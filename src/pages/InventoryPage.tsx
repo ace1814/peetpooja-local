@@ -20,7 +20,7 @@ export function InventoryPage() {
   const [tab, setTab] = useState<'stock' | 'purchase-orders' | 'recipes'>('stock');
 
   const materials = useLiveQuery(() => db.rawMaterials.toArray(), []) ?? [];
-  const menuItems = useLiveQuery(() => db.menuItems.where('isActive').equals(1).toArray(), []) ?? [];
+  const menuItems = useLiveQuery(() => db.menuItems.filter(m => m.isActive).toArray(), []) ?? [];
   const recipes = useLiveQuery(() => db.recipes.toArray(), []) ?? [];
   const purchaseOrders = useLiveQuery(() => db.purchaseOrders.orderBy('createdAt').reverse().toArray(), []) ?? [];
 

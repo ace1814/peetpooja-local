@@ -13,8 +13,8 @@ import clsx from 'clsx';
 export function BillingPage() {
   const store = useBillingStore();
   const settings = useLiveQuery(() => db.settings.get(1));
-  const categories = useLiveQuery(() => db.categories.where('isActive').equals(1).sortBy('sortOrder'), []) ?? [];
-  const allItems = useLiveQuery(() => db.menuItems.where('isActive').equals(1).toArray(), []) ?? [];
+  const categories = useLiveQuery(() => db.categories.filter(c => c.isActive).toArray().then(r => r.sort((a,b) => a.sortOrder - b.sortOrder)), []) ?? [];
+  const allItems = useLiveQuery(() => db.menuItems.filter(m => m.isActive).toArray(), []) ?? [];
   const tables = useLiveQuery(() => db.diningTables.toArray(), []) ?? [];
 
   const [activeCat, setActiveCat] = useState<number | 'all'>('all');

@@ -15,7 +15,7 @@ const navItems = [
 
 export function Sidebar() {
   const lowStockCount = useLiveQuery(async () => {
-    const materials = await db.rawMaterials.where('isActive').equals(1).toArray();
+    const materials = await db.rawMaterials.filter(m => m.isActive).toArray();
     return materials.filter(m => m.currentStock <= m.lowStockThreshold).length;
   }, []) ?? 0;
 
