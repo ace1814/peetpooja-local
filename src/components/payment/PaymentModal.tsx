@@ -12,6 +12,7 @@ import { InvoiceTemplate } from '../print/InvoiceTemplate';
 import type { BillTotals, Invoice, InvoiceItem, PaymentMethod } from '../../types';
 import clsx from 'clsx';
 
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -22,6 +23,7 @@ type Tab = 'cash' | 'card' | 'upi' | 'split';
 
 export function PaymentModal({ open, onClose, totals }: Props) {
   const store = useBillingStore();
+  const { draftInvoiceId } = store;
   const { showToast } = useToast();
   const settings = useLiveQuery(() => db.settings.get(1));
   const printRef = useRef<HTMLDivElement>(null);
@@ -68,7 +70,7 @@ export function PaymentModal({ open, onClose, totals }: Props) {
 
     setSaving(true);
     try {
-      const invoiceNumber = await getNextInvoiceNumber();
+      const now = new Date();
 
       // Build invoice items from cart
       const invoiceItems: InvoiceItem[] = store.cartItems.map(c => {
@@ -87,55 +89,98 @@ export function PaymentModal({ open, onClose, totals }: Props) {
         };
       });
 
-      const now = new Date();
-      const invoice: Invoice = {
-        invoiceNumber,
-        orderType: store.orderType,
-        tableId: store.selectedTable?.id,
-        tableNumber: store.selectedTable?.tableNumber,
-        customerName: store.customerName || undefined,
-        customerPhone: store.customerPhone || undefined,
-        customerGstin: store.customerGstin || undefined,
-        items: invoiceItems,
-        billDiscountType: store.billDiscountType,
-        billDiscountValue: store.billDiscountValue,
-        ...totals,
-        payments: paymentEntries,
-        amountReceived,
-        changeReturned,
-        status: 'paid',
-        notes: store.notes || undefined,
-        createdAt: now,
-        updatedAt: now,
-        printedAt: now,
-      };
+      let invoice: Invoice;
 
-      await db.transaction('rw', [db.invoices, db.diningTables, db.rawMaterials, db.recipes], async () => {
-        // Save invoice
-        const id = await db.invoices.add(invoice);
-        invoice.id = id as number;
+      if (draftInvoiceId) {
+        // Dine-in: update existing draft → paid
+        await db.transaction('rw', [db.invoices, db.diningTables, db.rawMaterials, db.recipes], async () => {
+          await db.invoices.update(draftInvoiceId, {
+            items: invoiceItems,
+            billDiscountType: store.billDiscountType,
+            billDiscountValue: store.billDiscountValue,
+            ...totals,
+            payments: paymentEntries,
+            amountReceived,
+            changeReturned,
+            status: 'paid',
+            notes: store.notes || undefined,
+            updatedAt: now,
+            printedAt: now,
+          });
 
-        // Free up table
-        if (store.selectedTable?.id) {
-          await db.diningTables.update(store.selectedTable.id, { status: 'available', currentInvoiceId: undefined });
-        }
-
-        // Deduct inventory via recipes
-        for (const item of store.cartItems) {
-          const recipe = await db.recipes.where('menuItemId').equals(item.menuItemId).first();
-          if (!recipe) continue;
-          for (const ing of recipe.ingredients) {
-            const material = await db.rawMaterials.get(ing.rawMaterialId);
-            if (!material) continue;
-            const deduct = ing.quantity * item.quantity;
-            const newStock = Math.max(0, material.currentStock - deduct);
-            await db.rawMaterials.update(ing.rawMaterialId, { currentStock: newStock });
+          // Free up table
+          if (store.selectedTable?.id) {
+            await db.diningTables.update(store.selectedTable.id, { status: 'available', currentInvoiceId: undefined });
           }
-        }
-      });
+
+          // Deduct inventory via recipes
+          for (const item of store.cartItems) {
+            const recipe = await db.recipes.where('menuItemId').equals(item.menuItemId).first();
+            if (!recipe) continue;
+            for (const ing of recipe.ingredients) {
+              const material = await db.rawMaterials.get(ing.rawMaterialId);
+              if (!material) continue;
+              const deduct = ing.quantity * item.quantity;
+              const newStock = Math.max(0, material.currentStock - deduct);
+              await db.rawMaterials.update(ing.rawMaterialId, { currentStock: newStock });
+            }
+          }
+        });
+
+        const saved = await db.invoices.get(draftInvoiceId);
+        invoice = saved!;
+      } else {
+        // Takeaway / new order: create fresh invoice
+        const invoiceNumber = await getNextInvoiceNumber();
+
+        invoice = {
+          invoiceNumber,
+          orderType: store.orderType,
+          tableId: store.selectedTable?.id,
+          tableNumber: store.selectedTable?.tableNumber,
+          customerName: store.customerName || undefined,
+          customerPhone: store.customerPhone || undefined,
+          customerGstin: store.customerGstin || undefined,
+          items: invoiceItems,
+          billDiscountType: store.billDiscountType,
+          billDiscountValue: store.billDiscountValue,
+          ...totals,
+          payments: paymentEntries,
+          amountReceived,
+          changeReturned,
+          status: 'paid',
+          notes: store.notes || undefined,
+          createdAt: now,
+          updatedAt: now,
+          printedAt: now,
+        };
+
+        await db.transaction('rw', [db.invoices, db.diningTables, db.rawMaterials, db.recipes], async () => {
+          const id = await db.invoices.add(invoice);
+          invoice.id = id as number;
+
+          // Free up table
+          if (store.selectedTable?.id) {
+            await db.diningTables.update(store.selectedTable.id, { status: 'available', currentInvoiceId: undefined });
+          }
+
+          // Deduct inventory via recipes
+          for (const item of store.cartItems) {
+            const recipe = await db.recipes.where('menuItemId').equals(item.menuItemId).first();
+            if (!recipe) continue;
+            for (const ing of recipe.ingredients) {
+              const material = await db.rawMaterials.get(ing.rawMaterialId);
+              if (!material) continue;
+              const deduct = ing.quantity * item.quantity;
+              const newStock = Math.max(0, material.currentStock - deduct);
+              await db.rawMaterials.update(ing.rawMaterialId, { currentStock: newStock });
+            }
+          }
+        });
+      }
 
       setSavedInvoice(invoice);
-      showToast(`Bill ${invoiceNumber} saved!`);
+      showToast(`Bill ${invoice.invoiceNumber} saved!`);
 
       // Trigger print
       setTimeout(() => triggerPrint(), 100);

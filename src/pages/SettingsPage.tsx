@@ -79,10 +79,11 @@ export function SettingsPage() {
         <Section title="Invoice Settings">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Input label="Invoice Prefix" value={form.invoicePrefix ?? 'INV'} onChange={e => update('invoicePrefix', e.target.value)} placeholder="INV" />
-            <div className="flex items-center gap-2 pt-6">
-              <input type="checkbox" id="thermal" checked={form.thermalMode ?? false} onChange={e => update('thermalMode', e.target.checked)} className="accent-brand-red" />
-              <label htmlFor="thermal" className="text-sm text-gray-700">Thermal (80mm) Print</label>
-            </div>
+            <Select label="Print Size" value={form.printSize ?? '58mm'} onChange={e => update('printSize', e.target.value)}>
+              <option value="58mm">58mm (Thermal)</option>
+              <option value="80mm">80mm (Thermal)</option>
+              <option value="a4">A4 (Full Page)</option>
+            </Select>
             <div className="flex items-center gap-2">
               <input type="checkbox" id="autoexport" checked={form.autoExportOnBill ?? false} onChange={e => update('autoExportOnBill', e.target.checked)} className="accent-brand-red" />
               <label htmlFor="autoexport" className="text-sm text-gray-700">Auto-export to Excel on each bill</label>

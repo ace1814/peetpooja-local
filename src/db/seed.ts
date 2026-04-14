@@ -22,6 +22,7 @@ export async function seedDatabase() {
     enableRoundOff: true,
     printCopies: 1,
     thermalMode: false,
+    printSize: '58mm',
     footerMessage: 'Thank you for dining with us!',
     autoExportOnBill: false,
   });

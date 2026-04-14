@@ -10,7 +10,11 @@ interface Props {
 export const InvoiceTemplate = forwardRef<HTMLDivElement, Props>(({ invoice, settings }, ref) => {
   if (!invoice || !settings) return <div ref={ref} />;
 
-  const isThermal = settings.thermalMode;
+  const printSize = settings.printSize ?? '58mm';
+  const isThermal = printSize !== 'a4';
+  const width = printSize === 'a4' ? '210mm' : printSize;
+  const fontSize = printSize === 'a4' ? '12px' : '11px';
+  const padding = printSize === 'a4' ? '10mm' : '2mm';
 
   return (
     <div
@@ -18,13 +22,14 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, Props>(({ invoice, set
       className="print-only"
       style={{
         fontFamily: 'monospace',
-        fontSize: isThermal ? '11px' : '12px',
-        width: isThermal ? '80mm' : '210mm',
-        padding: isThermal ? '2mm' : '10mm',
+        fontSize,
+        width,
+        padding,
         color: '#000',
         background: '#fff',
       }}
     >
+      <style>{`@media print { @page { size: ${printSize} auto; margin: 1mm; } }`}</style>
       {/* Header */}
       <div style={{ textAlign: 'center', borderBottom: '1px dashed #000', paddingBottom: '6px', marginBottom: '6px' }}>
         {settings.logoBase64 && (

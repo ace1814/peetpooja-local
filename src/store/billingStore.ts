@@ -1,8 +1,8 @@
 import { create } from 'zustand';
-import type { CartItem, DiningTable, DiscountType, MenuItem, OrderType, PaymentEntry } from '../types';
+import type { CartItem, DiningTable, DiscountType, Invoice, MenuItem, OrderType, PaymentEntry } from '../types';
 import { calcItemLine } from '../utils/gst';
 
-export type BillingStep = 'select-table' | 'build-order' | 'payment' | 'complete';
+export type BillingStep = 'build-order' | 'payment' | 'complete';
 
 interface BillingState {
   step: BillingStep;
@@ -16,6 +16,8 @@ interface BillingState {
   customerName: string;
   customerPhone: string;
   customerGstin: string;
+  draftInvoiceId: number | null;
+  draftInvoiceNumber: string | null;
 
   setStep: (step: BillingStep) => void;
   setOrderType: (type: OrderType) => void;
@@ -30,6 +32,7 @@ interface BillingState {
   addPayment: (entry: PaymentEntry) => void;
   removePayment: (index: number) => void;
   clearPayments: () => void;
+  loadDraft: (invoice: Invoice, table: DiningTable | null) => void;
   resetOrder: () => void;
 }
 
@@ -56,22 +59,28 @@ function recomputeItem(item: CartItem, gstMode: 'cgst_sgst' | 'igst'): CartItem 
   return { ...item, ...line };
 }
 
-export const useBillingStore = create<BillingState>((set) => ({
-  step: 'build-order',
-  orderType: 'takeaway',
+const emptyState = {
+  step: 'build-order' as BillingStep,
+  orderType: 'takeaway' as OrderType,
   selectedTable: null,
   cartItems: [],
-  billDiscountType: 'none',
+  billDiscountType: 'none' as DiscountType,
   billDiscountValue: 0,
   notes: '',
   payments: [],
   customerName: '',
   customerPhone: '',
   customerGstin: '',
+  draftInvoiceId: null,
+  draftInvoiceNumber: null,
+};
+
+export const useBillingStore = create<BillingState>((set) => ({
+  ...emptyState,
 
   setStep: (step) => set({ step }),
-  setOrderType: (orderType) => set({ orderType, selectedTable: null }),
-  selectTable: (table) => set({ selectedTable: table, step: 'build-order' }),
+  setOrderType: (orderType) => set({ orderType, selectedTable: null, draftInvoiceId: null, draftInvoiceNumber: null }),
+  selectTable: (table) => set({ selectedTable: table }),
 
   addItem: (menuItem, gstMode) => set((state) => {
     const existing = state.cartItems.find(c => c.menuItemId === menuItem.id);
@@ -118,17 +127,25 @@ export const useBillingStore = create<BillingState>((set) => ({
   removePayment: (index) => set((state) => ({ payments: state.payments.filter((_, i) => i !== index) })),
   clearPayments: () => set({ payments: [] }),
 
-  resetOrder: () => set({
-    step: 'build-order',
-    orderType: 'takeaway',
-    selectedTable: null,
-    cartItems: [],
-    billDiscountType: 'none',
-    billDiscountValue: 0,
-    notes: '',
+  loadDraft: (invoice, table) => set({
+    draftInvoiceId: invoice.id ?? null,
+    draftInvoiceNumber: invoice.invoiceNumber,
+    orderType: invoice.orderType,
+    selectedTable: table,
+    cartItems: invoice.items.map(item => ({
+      ...item,
+      tempDiscountType: item.discountType,
+      tempDiscountValue: item.discountValue,
+    })),
+    billDiscountType: invoice.billDiscountType,
+    billDiscountValue: invoice.billDiscountValue,
+    notes: invoice.notes ?? '',
+    customerName: invoice.customerName ?? '',
+    customerPhone: invoice.customerPhone ?? '',
+    customerGstin: invoice.customerGstin ?? '',
     payments: [],
-    customerName: '',
-    customerPhone: '',
-    customerGstin: '',
+    step: 'build-order',
   }),
+
+  resetOrder: () => set({ ...emptyState }),
 }));

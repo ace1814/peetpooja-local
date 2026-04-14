@@ -170,6 +170,7 @@ export interface RestaurantSettings {
   enableRoundOff: boolean;
   printCopies: number;
   thermalMode: boolean;
+  printSize: '58mm' | '80mm' | 'a4';
   footerMessage: string;
   autoExportOnBill: boolean;
 }
