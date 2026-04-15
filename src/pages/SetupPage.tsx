@@ -2,12 +2,19 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { initSupabase } from '../lib/supabase';
 import { seedInitialData } from '../lib/db';
+import { useAuth } from '../context/AuthContext';
 
 type Step = 1 | 2 | 3;
 type MigrateMode = 'auto' | 'manual';
 
 export function SetupPage() {
   const navigate = useNavigate();
+  const { firebaseUser, signOut } = useAuth();
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/login', { replace: true });
+  };
   const [step, setStep] = useState<Step>(1);
 
   // Step 2 — auto-migrate
@@ -355,6 +362,22 @@ export function SetupPage() {
         <p className="text-center text-xs text-gray-400 mt-6">
           Your credentials are stored only in your browser — we never see them.
         </p>
+
+        {/* Sign-out / switch account */}
+        <div className="flex items-center justify-center gap-1.5 mt-3 text-xs text-gray-400">
+          {firebaseUser && (
+            <>
+              <span className="truncate max-w-[160px]">Signed in as {firebaseUser.email}</span>
+              <span>·</span>
+            </>
+          )}
+          <button
+            onClick={handleSignOut}
+            className="text-brand-red hover:underline font-medium"
+          >
+            {firebaseUser ? 'Sign out / switch account' : 'Back to sign in'}
+          </button>
+        </div>
       </div>
     </div>
   );
