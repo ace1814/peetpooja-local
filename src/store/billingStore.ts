@@ -33,6 +33,7 @@ interface BillingState {
   removePayment: (index: number) => void;
   clearPayments: () => void;
   loadDraft: (invoice: Invoice, table: DiningTable | null) => void;
+  switchToTable: (table: DiningTable) => void;
   resetOrder: () => void;
 }
 
@@ -146,6 +147,9 @@ export const useBillingStore = create<BillingState>((set) => ({
     payments: [],
     step: 'build-order',
   }),
+
+  // Switch to a different table, resetting all order state (draft stays in DB)
+  switchToTable: (table) => set({ ...emptyState, orderType: 'dine-in', selectedTable: table }),
 
   resetOrder: () => set({ ...emptyState }),
 }));

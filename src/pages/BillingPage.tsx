@@ -59,7 +59,10 @@ export function BillingPage() {
   const handleAddItem = (item: MenuItem) => store.addItem(item, gstMode);
 
   const handleTableSelect = async (table: DiningTable) => {
-    // If occupied and has a draft, load it
+    // Tapping the already-selected table → no-op
+    if (store.selectedTable?.id === table.id) return;
+
+    // Occupied with a saved draft → load that order
     if (table.status === 'occupied' && table.currentInvoiceId) {
       const draft = await db.invoices.get(table.currentInvoiceId);
       if (draft && draft.status === 'draft') {
@@ -68,9 +71,14 @@ export function BillingPage() {
         return;
       }
     }
-    // Free table → just select it
+
+    // Available / reserved → switch to it
     if (table.status === 'available' || table.status === 'reserved') {
-      store.selectTable(table);
+      if (store.draftInvoiceId && store.selectedTable) {
+        // Let user know the previous draft is safely stored in DB
+        showToast(`Order ${store.draftInvoiceNumber} saved for Table ${store.selectedTable.tableNumber}`, 'info');
+      }
+      store.switchToTable(table);
     }
   };
 
@@ -176,7 +184,7 @@ export function BillingPage() {
             {(['takeaway', 'dine-in'] as const).map(type => (
               <button
                 key={type}
-                onClick={() => { store.setOrderType(type); store.resetOrder(); store.setOrderType(type); }}
+                onClick={() => { store.resetOrder(); store.setOrderType(type); }}
                 className={clsx(
                   'flex-1 py-2 rounded-lg text-sm font-medium capitalize transition-colors',
                   store.orderType === type ? 'bg-brand-red text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
