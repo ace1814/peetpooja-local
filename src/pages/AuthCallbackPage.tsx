@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getSupabase } from '../lib/supabase';
+import { seedInitialData } from '../lib/db';
 
 export function AuthCallbackPage() {
   const navigate = useNavigate();
@@ -9,8 +10,10 @@ export function AuthCallbackPage() {
     const sb = getSupabase();
     if (!sb) { navigate('/setup', { replace: true }); return; }
 
-    sb.auth.getSession().then(({ data }) => {
+    sb.auth.getSession().then(async ({ data }) => {
       if (data.session) {
+        // Seed default menu/tables/materials on first login (skips if data exists)
+        try { await seedInitialData(); } catch {}
         navigate('/billing', { replace: true });
       } else {
         navigate('/login', { replace: true });

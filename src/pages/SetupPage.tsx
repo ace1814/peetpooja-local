@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { initSupabase } from '../lib/supabase';
-import { seedInitialData } from '../lib/db';
 
 const MIGRATION_SQL_URL = '/supabase/migration.sql';
 
@@ -46,12 +45,11 @@ export function SetupPage() {
     setLoading(true);
     try {
       initSupabase(url.trim(), key.trim());
-      // Test connection
+      // Test connection — restaurant_settings is readable by anon
       const sb = (await import('../lib/supabase')).getSupabase()!;
       const { error: testErr } = await sb.from('restaurant_settings').select('id').limit(1);
       if (testErr) throw new Error('Could not connect. Have you run the migration SQL?');
-      // Seed default data (skips if data already exists)
-      await seedInitialData();
+      // Seed happens after login (needs authenticated role for INSERT)
       navigate('/login', { replace: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Connection failed');
@@ -61,22 +59,22 @@ export function SetupPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-xl">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col items-center justify-center p-4">
+      <div className="w-full max-w-md">
         {/* Logo */}
-        <div className="flex items-center gap-3 mb-8 justify-center">
+        <div className="flex items-center gap-3 mb-6 justify-center">
           <div className="w-10 h-10 bg-brand-red rounded-xl flex items-center justify-center text-white font-bold text-lg">P</div>
           <span className="text-2xl font-bold font-display text-gray-900">PeetPooja Billing</span>
         </div>
 
         {/* Step indicator */}
-        <div className="flex items-center gap-2 mb-8 justify-center">
+        <div className="flex items-center justify-center gap-2 mb-6">
           {([1, 2, 3] as Step[]).map(s => (
             <div key={s} className="flex items-center gap-2">
               <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold transition-colors ${
                 step >= s ? 'bg-brand-red text-white' : 'bg-gray-200 text-gray-500'
               }`}>{s}</div>
-              {s < 3 && <div className={`w-12 h-0.5 ${step > s ? 'bg-brand-red' : 'bg-gray-200'}`} />}
+              {s < 3 && <div className={`w-10 h-0.5 ${step > s ? 'bg-brand-red' : 'bg-gray-200'}`} />}
             </div>
           ))}
         </div>
