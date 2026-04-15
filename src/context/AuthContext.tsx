@@ -1,47 +1,49 @@
-import { createContext, useContext } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { useUser, useClerk, useSignIn } from '@clerk/clerk-react';
-import { isConfigured, isWaiterMode } from '../lib/supabase';
+import type { User } from 'firebase/auth';
+import { auth, onAuthStateChanged, signOut as firebaseSignOut } from '../lib/firebase';
+import { isConfigured, isWaiterMode, resetClient } from '../lib/supabase';
 
 interface AuthContextValue {
+  firebaseUser: User | null;
   isOwner: boolean;
   isWaiter: boolean;
   loading: boolean;
-  signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const { isSignedIn, isLoaded } = useUser();
-  const { signOut: clerkSignOut } = useClerk();
-  const { signIn, isLoaded: signInLoaded } = useSignIn();
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const isOwner = !!isSignedIn && isConfigured();
-  const isWaiter = !isSignedIn && isWaiterMode();
-  const loading = !isLoaded;
-
-  const signInWithGoogle = async () => {
-    if (!signInLoaded || !signIn) throw new Error('Sign-in not ready');
-    await signIn.authenticateWithRedirect({
-      strategy: 'oauth_google',
-      redirectUrl: `${window.location.origin}/auth/callback`,
-      redirectUrlComplete: '/billing',
+  useEffect(() => {
+    // Firebase persists auth state in localStorage automatically across page loads
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setFirebaseUser(user);
+      setLoading(false);
     });
-  };
+    return unsubscribe;
+  }, []);
 
   const signOut = async () => {
-    await clerkSignOut();
-    // Keep Supabase credentials — owner set those up intentionally
-    // Clear waiter session if present
+    await firebaseSignOut(auth);
+    // Clear waiter session (if any)
     sessionStorage.removeItem('sb_url');
     sessionStorage.removeItem('sb_anon_key');
     sessionStorage.removeItem('sb_mode');
+    sessionStorage.removeItem('sb_restaurant');
+    resetClient();
   };
 
+  // Owner = signed in with Firebase + has a Supabase project configured
+  const isOwner  = !!firebaseUser && isConfigured();
+  // Waiter = no Firebase auth + has sessionStorage token from invite link
+  const isWaiter = !firebaseUser && isWaiterMode();
+
   return (
-    <AuthContext.Provider value={{ isOwner, isWaiter, loading, signInWithGoogle, signOut }}>
+    <AuthContext.Provider value={{ firebaseUser, isOwner, isWaiter, loading, signOut }}>
       {children}
     </AuthContext.Provider>
   );

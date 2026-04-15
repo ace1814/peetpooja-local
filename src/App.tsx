@@ -12,7 +12,7 @@ import { ReportsPage } from './pages/ReportsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { SetupPage } from './pages/SetupPage';
 import { LoginPage } from './pages/LoginPage';
-import { AuthCallbackPage, AuthSeedPage } from './pages/AuthCallbackPage';
+import { SignUpPage } from './pages/SignUpPage';
 import { isConfigured, resetClient } from './lib/supabase';
 
 // Waiter join page — reads token from URL, stores credentials, redirects to billing
@@ -66,10 +66,7 @@ function OwnerRoute({ children }: { children: React.ReactNode }) {
 }
 
 function AppRoutes() {
-  const { isOwner, isWaiter, loading } = useAuth();
-  const configured = isConfigured();
-
-  if (!configured) return <Navigate to="/setup" replace />;
+  const { firebaseUser, isWaiter, loading } = useAuth();
 
   if (loading) {
     return (
@@ -79,7 +76,24 @@ function AppRoutes() {
     );
   }
 
-  if (!isOwner && !isWaiter) return <Navigate to="/login" replace />;
+  // Waiter: only needs billing, no Firebase auth required
+  if (isWaiter) {
+    return (
+      <Routes>
+        <Route path="/" element={<AppShell />}>
+          <Route index element={<Navigate to="/billing" replace />} />
+          <Route path="billing" element={<BillingPage />} />
+          <Route path="*" element={<Navigate to="/billing" replace />} />
+        </Route>
+      </Routes>
+    );
+  }
+
+  // Not authenticated
+  if (!firebaseUser) return <Navigate to="/login" replace />;
+
+  // Authenticated but database not connected yet
+  if (!isConfigured()) return <Navigate to="/setup" replace />;
 
   return (
     <Routes>
@@ -106,11 +120,10 @@ export default function App() {
         <AuthProvider>
           <Routes>
             {/* Public routes */}
-            <Route path="/setup"         element={<SetupPage />} />
-            <Route path="/login"         element={<LoginPage />} />
-            <Route path="/auth/callback" element={<AuthCallbackPage />} />
-            <Route path="/auth/seed"     element={<AuthSeedPage />} />
-            <Route path="/join"          element={<JoinPage />} />
+            <Route path="/signup" element={<SignUpPage />} />
+            <Route path="/login"  element={<LoginPage />} />
+            <Route path="/setup"  element={<SetupPage />} />
+            <Route path="/join"   element={<JoinPage />} />
 
             {/* Protected app routes */}
             <Route path="/*" element={<AppRoutes />} />
