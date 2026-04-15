@@ -124,6 +124,9 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
 );
 
 -- ─── Row Level Security ───────────────────────────────────────
+-- Auth is handled by Clerk (not Supabase Auth).
+-- All requests arrive with the anon key, so we grant anon full access.
+-- Access control (owner vs waiter) is enforced at the UI level.
 
 ALTER TABLE restaurant_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE categories           ENABLE ROW LEVEL SECURITY;
@@ -134,25 +137,15 @@ ALTER TABLE raw_materials        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE recipes              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE purchase_orders      ENABLE ROW LEVEL SECURITY;
 
--- Owner (authenticated) — full access to everything
-CREATE POLICY "owner_all" ON restaurant_settings FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "owner_all" ON categories           FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "owner_all" ON menu_items           FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "owner_all" ON dining_tables        FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "owner_all" ON invoices             FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "owner_all" ON raw_materials        FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "owner_all" ON recipes              FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "owner_all" ON purchase_orders      FOR ALL TO authenticated USING (true) WITH CHECK (true);
-
--- Waiter (anon) — read menu/tables/settings; create+edit draft invoices only
-CREATE POLICY "waiter_read_settings"   ON restaurant_settings FOR SELECT TO anon USING (true);
-CREATE POLICY "waiter_read_categories" ON categories           FOR SELECT TO anon USING (is_active = true);
-CREATE POLICY "waiter_read_menu"       ON menu_items           FOR SELECT TO anon USING (is_active = true);
-CREATE POLICY "waiter_read_tables"     ON dining_tables        FOR SELECT TO anon USING (true);
-CREATE POLICY "waiter_update_tables"   ON dining_tables        FOR UPDATE TO anon USING (true) WITH CHECK (true);
-CREATE POLICY "waiter_select_drafts"   ON invoices             FOR SELECT TO anon USING (status = 'draft');
-CREATE POLICY "waiter_insert_drafts"   ON invoices             FOR INSERT TO anon WITH CHECK (status = 'draft');
-CREATE POLICY "waiter_update_drafts"   ON invoices             FOR UPDATE TO anon USING (status = 'draft') WITH CHECK (status = 'draft');
+-- Full access for anon (the only role used — Clerk handles identity)
+CREATE POLICY "anon_all" ON restaurant_settings FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "anon_all" ON categories           FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "anon_all" ON menu_items           FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "anon_all" ON dining_tables        FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "anon_all" ON invoices             FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "anon_all" ON raw_materials        FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "anon_all" ON recipes              FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "anon_all" ON purchase_orders      FOR ALL TO anon USING (true) WITH CHECK (true);
 
 -- ─── Invoice Number Function ──────────────────────────────────
 
@@ -176,7 +169,6 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION get_next_invoice_number() TO anon;
-GRANT EXECUTE ON FUNCTION get_next_invoice_number() TO authenticated;
 
 -- ─── Default Settings Row ─────────────────────────────────────
 

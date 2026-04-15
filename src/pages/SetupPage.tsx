@@ -114,43 +114,23 @@ export function SetupPage() {
             <div className="space-y-5">
               <div>
                 <h2 className="text-xl font-bold font-display text-gray-900">Create your database</h2>
-                <p className="text-gray-500 mt-1 text-sm">You need a free Supabase account. This takes about 5 minutes.</p>
+                <p className="text-gray-500 mt-1 text-sm">You need a free Supabase account. This takes about 3 minutes.</p>
               </div>
               <ol className="space-y-4">
-                <div className="flex gap-3">
-                  <span className="w-6 h-6 bg-brand-red text-white rounded-full text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">1</span>
-                  <p className="text-sm text-gray-700">Go to <a href="https://supabase.com" target="_blank" rel="noreferrer" className="text-brand-red font-medium underline">supabase.com</a> and create a free account</p>
-                </div>
-                <div className="flex gap-3">
-                  <span className="w-6 h-6 bg-brand-red text-white rounded-full text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">2</span>
-                  <p className="text-sm text-gray-700">Click <strong>"New Project"</strong>, give it a name (e.g. your restaurant name), set a database password</p>
-                </div>
-                <div className="flex gap-3">
-                  <span className="w-6 h-6 bg-brand-red text-white rounded-full text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">3</span>
-                  <p className="text-sm text-gray-700">Go to <strong>SQL Editor</strong> and paste + run the migration file below</p>
-                </div>
-                <div className="flex gap-3">
-                  <span className="w-6 h-6 bg-brand-red text-white rounded-full text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">4</span>
-                  <div className="text-sm text-gray-700 flex-1">
-                    <p>Go to <strong>Authentication → URL Configuration</strong> and set:</p>
-                    <div className="mt-2 space-y-2">
-                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                        <p className="text-xs font-semibold text-amber-700 uppercase mb-1">Site URL</p>
-                        <code className="text-xs text-amber-900 font-mono break-all">{window.location.origin}</code>
-                      </div>
-                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                        <p className="text-xs font-semibold text-amber-700 uppercase mb-1">Redirect URLs — add this</p>
-                        <code className="text-xs text-amber-900 font-mono break-all">{window.location.origin}/auth/callback</code>
-                        <CopyButton text={`${window.location.origin}/auth/callback`} />
-                      </div>
-                    </div>
-                    <p className="text-xs text-gray-400 mt-1">⚠️ Without this, magic link emails will redirect to localhost instead of your app.</p>
+                {[
+                  { n: 1, text: <>Go to <a href="https://supabase.com" target="_blank" rel="noreferrer" className="text-brand-red font-medium underline">supabase.com</a> and create a free account</> },
+                  { n: 2, text: <>Click <strong>"New Project"</strong>, give it a name (e.g. your restaurant name), set a database password</> },
+                  { n: 3, text: <>Once ready, go to <strong>SQL Editor</strong> and paste + run the migration file below</> },
+                ].map(({ n, text }) => (
+                  <div key={n} className="flex gap-3">
+                    <span className="w-6 h-6 bg-brand-red text-white rounded-full text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">{n}</span>
+                    <p className="text-sm text-gray-700">{text}</p>
                   </div>
-                </div>
+                ))}
               </ol>
 
               <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
-                <p className="text-xs font-semibold text-gray-500 uppercase mb-3">Migration SQL file (for step 3)</p>
+                <p className="text-xs font-semibold text-gray-500 uppercase mb-3">Migration SQL file</p>
                 <div className="flex gap-2">
                   <button onClick={downloadSql} className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-2 hover:bg-gray-100 transition-colors font-medium">
                     ⬇ Download migration.sql
@@ -165,7 +145,7 @@ export function SetupPage() {
               <div className="flex gap-3 pt-2">
                 <button onClick={() => setStep(1)} className="px-4 py-2 text-gray-500 hover:text-gray-700 text-sm font-medium">← Back</button>
                 <button onClick={() => setStep(3)} className="flex-1 bg-brand-red hover:bg-red-700 text-white font-semibold py-2 rounded-xl transition-colors text-sm">
-                  Done — Connect now →
+                  I've run the SQL →
                 </button>
               </div>
             </div>
@@ -232,16 +212,3 @@ export function SetupPage() {
   );
 }
 
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-  return (
-    <button onClick={copy} className="mt-1 text-xs text-amber-700 underline hover:no-underline">
-      {copied ? '✓ Copied!' : 'Copy'}
-    </button>
-  );
-}

@@ -12,15 +12,13 @@ import { ReportsPage } from './pages/ReportsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { SetupPage } from './pages/SetupPage';
 import { LoginPage } from './pages/LoginPage';
-import { AuthCallbackPage } from './pages/AuthCallbackPage';
+import { AuthCallbackPage, AuthSeedPage } from './pages/AuthCallbackPage';
 import { isConfigured, resetClient } from './lib/supabase';
 
 // Waiter join page — reads token from URL, stores credentials, redirects to billing
 function JoinPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const [status, setStatus] = ['' as string, (_: string) => {}];
-  void status; void setStatus;
 
   useEffect(() => {
     const token = params.get('token');
@@ -35,7 +33,7 @@ function JoinPage() {
       sessionStorage.setItem('sb_anon_key', decoded.key);
       sessionStorage.setItem('sb_mode', 'waiter');
       sessionStorage.setItem('sb_restaurant', decoded.restaurantName ?? '');
-      resetClient(); // force client recreation from sessionStorage
+      resetClient();
       navigate('/billing', { replace: true });
     } catch {
       navigate('/login', { replace: true });
@@ -111,6 +109,7 @@ export default function App() {
             <Route path="/setup"         element={<SetupPage />} />
             <Route path="/login"         element={<LoginPage />} />
             <Route path="/auth/callback" element={<AuthCallbackPage />} />
+            <Route path="/auth/seed"     element={<AuthSeedPage />} />
             <Route path="/join"          element={<JoinPage />} />
 
             {/* Protected app routes */}
