@@ -57,9 +57,10 @@ export function SetupPage() {
       // API also returns the anon key so the user doesn't have to copy it manually
       if (data.anonKey) {
         setAutoAnonKey(data.anonKey);
-        // Auto-connect
+        // Auto-connect — skip seedInitialData() here because PostgREST schema cache
+        // takes 30–60 s to refresh after DDL; the migration SQL already inserts
+        // the default restaurant_settings row so the app is fully functional.
         initSupabase(projectUrl.trim(), data.anonKey);
-        await seedInitialData();
         navigate('/billing', { replace: true });
       } else {
         // Migration succeeded but anon key wasn't returned — go to manual connect step
@@ -90,7 +91,8 @@ export function SetupPage() {
       const sb = (await import('../lib/supabase')).getSupabase()!;
       const { error: testErr } = await sb.from('restaurant_settings').select('id').limit(1);
       if (testErr) throw new Error('Could not connect. Have you run the migration SQL?');
-      await seedInitialData();
+      // Best-effort seed — ignore schema-cache errors (PostgREST may still be warming up)
+      try { await seedInitialData(); } catch { /* seed failure is non-fatal */ }
       navigate('/billing', { replace: true });
     } catch (e) {
       setConnectError(e instanceof Error ? e.message : 'Connection failed');
