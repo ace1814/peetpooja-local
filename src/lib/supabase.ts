@@ -83,3 +83,8 @@ export function isWaiterMode(): boolean {
 export function resetClient(): void {
   _client = null;
 }
+
+/** Return the active credentials (URL + anon key) or null if not configured. */
+export function getCredentials(): { url: string; key: string } | null {
+  return readCredentials();
+}

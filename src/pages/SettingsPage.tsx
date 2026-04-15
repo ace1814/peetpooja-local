@@ -5,6 +5,7 @@ import { Input, Select } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../context/AuthContext';
+import { getCredentials } from '../lib/supabase';
 import type { RestaurantSettings } from '../types';
 
 export function SettingsPage() {
@@ -50,10 +51,9 @@ export function SettingsPage() {
   };
 
   const generateWaiterLink = () => {
-    const sbUrl = localStorage.getItem('sb_url');
-    const sbKey = localStorage.getItem('sb_anon_key');
-    if (!sbUrl || !sbKey) { showToast('Database not configured', 'error'); return; }
-    const token = btoa(JSON.stringify({ url: sbUrl, key: sbKey, restaurantName: form.restaurantName ?? '' }));
+    const creds = getCredentials();
+    if (!creds) { showToast('Database not configured', 'error'); return; }
+    const token = btoa(JSON.stringify({ url: creds.url, key: creds.key, restaurantName: form.restaurantName ?? '' }));
     setWaiterLink(`${window.location.origin}/join?token=${token}`);
   };
 
