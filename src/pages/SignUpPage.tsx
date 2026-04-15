@@ -1,16 +1,6 @@
-/**
- * Sign-up page — for brand new restaurant owners.
- *
- * Flow:
- *  1. User arrives here from landing page / "Create account" link
- *  2. Clicks "Sign up with Google"
- *  3. Firebase Google OAuth (signInWithRedirect)
- *  4. Returns here → we register them in the platform users table
- *  5. Navigate to /setup so they can connect their own Supabase database
- */
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { auth, googleProvider, signInWithRedirect, getRedirectResult } from '../lib/firebase';
+import { auth, googleProvider, signInWithPopup } from '../lib/firebase';
 import { registerPlatformUser, getPlatformUser, isPlatformDbConfigured } from '../lib/platformDb';
 import { isConfigured } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -22,41 +12,7 @@ export function SignUpPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // ── Handle the redirect result when returning from Google ──
-  useEffect(() => {
-    async function handleRedirect() {
-      setBusy(true);
-      try {
-        const result = await getRedirectResult(auth);
-        if (!result) return;
-
-        const { uid, email, displayName } = result.user;
-
-        // If platform DB is wired up, check if they already have an account
-        if (isPlatformDbConfigured()) {
-          const existing = await getPlatformUser(uid);
-          if (existing) {
-            // They already signed up — send them to login instead
-            navigate('/login', { replace: true });
-            return;
-          }
-          // Register as a new user
-          await registerPlatformUser(uid, email, displayName);
-        }
-
-        // New users always go through setup to connect their database
-        navigate(isConfigured() ? '/billing' : '/setup', { replace: true });
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Sign-up failed. Please try again.');
-      } finally {
-        setBusy(false);
-      }
-    }
-    handleRedirect();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ── Already signed in from a previous session ──
+  // Already signed in → skip straight to app or setup
   useEffect(() => {
     if (loading || busy) return;
     if (firebaseUser) {
@@ -64,9 +20,32 @@ export function SignUpPage() {
     }
   }, [firebaseUser, loading, busy, navigate]);
 
-  const handleSignUp = () => {
+  const handleSignUp = async () => {
     setError('');
-    signInWithRedirect(auth, googleProvider);
+    setBusy(true);
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const { uid, email, displayName } = result.user;
+
+      // If platform DB is configured, check if they already have an account
+      if (isPlatformDbConfigured()) {
+        const existing = await getPlatformUser(uid);
+        if (existing) {
+          // Already registered — send to login instead
+          navigate('/login', { replace: true });
+          return;
+        }
+        await registerPlatformUser(uid, email, displayName);
+      }
+
+      // New users always go through setup to connect their own database
+      navigate(isConfigured() ? '/billing' : '/setup', { replace: true });
+    } catch (e: unknown) {
+      if (e instanceof Error && e.message.includes('popup-closed')) return;
+      setError(e instanceof Error ? e.message : 'Sign-up failed. Please try again.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (

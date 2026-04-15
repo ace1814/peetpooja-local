@@ -2,8 +2,7 @@ import { initializeApp } from 'firebase/app';
 import {
   getAuth,
   GoogleAuthProvider,
-  signInWithRedirect,
-  getRedirectResult,
+  signInWithPopup,
   signOut,
   onAuthStateChanged,
 } from 'firebase/auth';
@@ -14,11 +13,11 @@ const firebaseConfig = {
   projectId:  import.meta.env.VITE_FIREBASE_PROJECT_ID  as string,
 };
 
-export const firebaseApp  = initializeApp(firebaseConfig);
-export const auth         = getAuth(firebaseApp);
+export const firebaseApp    = initializeApp(firebaseConfig);
+export const auth           = getAuth(firebaseApp);
 export const googleProvider = new GoogleAuthProvider();
 
 // Always show account-chooser so users can switch restaurants
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
-export { signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged };
+export { signInWithPopup, signOut, onAuthStateChanged };

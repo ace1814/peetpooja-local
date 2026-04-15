@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { auth, googleProvider, signInWithRedirect, getRedirectResult, signOut } from '../lib/firebase';
+import { auth, googleProvider, signInWithPopup, signOut } from '../lib/firebase';
 import { getPlatformUser, registerPlatformUser, isPlatformDbConfigured } from '../lib/platformDb';
 import { isConfigured } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -11,45 +11,7 @@ export function LoginPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // ── Handle the redirect result when returning from Google ──
-  useEffect(() => {
-    async function handleRedirect() {
-      setBusy(true);
-      try {
-        const result = await getRedirectResult(auth);
-        if (!result) return; // not returning from a redirect
-
-        const { uid, email, displayName } = result.user;
-
-        // If platform DB is configured, check the user exists (registered)
-        if (isPlatformDbConfigured()) {
-          const existing = await getPlatformUser(uid);
-          if (!existing) {
-            await signOut(auth);
-            setError("No account found. Please sign up first — it only takes a minute.");
-            return;
-          }
-          // Update last-seen timestamp
-          await registerPlatformUser(uid, email, displayName);
-        }
-
-        // Route based on whether they've configured their database
-        if (isConfigured()) {
-          navigate('/billing', { replace: true });
-        } else {
-          navigate('/setup', { replace: true });
-        }
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Sign-in failed. Please try again.');
-      } finally {
-        setBusy(false);
-      }
-    }
-    handleRedirect();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ── Already signed in from a previous session ──
+  // Already signed in from a previous session → skip straight to the app
   useEffect(() => {
     if (loading || busy) return;
     if (firebaseUser) {
@@ -57,9 +19,33 @@ export function LoginPage() {
     }
   }, [firebaseUser, loading, busy, navigate]);
 
-  const handleSignIn = () => {
+  const handleSignIn = async () => {
     setError('');
-    signInWithRedirect(auth, googleProvider);
+    setBusy(true);
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const { uid, email, displayName } = result.user;
+
+      // If platform DB is configured, verify the user is already registered
+      if (isPlatformDbConfigured()) {
+        const existing = await getPlatformUser(uid);
+        if (!existing) {
+          await signOut(auth);
+          setError('No account found. Please sign up first — it only takes a minute.');
+          return;
+        }
+        // Update last-seen timestamp
+        await registerPlatformUser(uid, email, displayName);
+      }
+
+      navigate(isConfigured() ? '/billing' : '/setup', { replace: true });
+    } catch (e: unknown) {
+      // User closed the popup — not an error worth showing
+      if (e instanceof Error && e.message.includes('popup-closed')) return;
+      setError(e instanceof Error ? e.message : 'Sign-in failed. Please try again.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -146,7 +132,7 @@ export function GoogleButton({
           <path d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 01-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z" fill="#1976D2"/>
         </svg>
       )}
-      {loading ? 'Redirecting to Google…' : label}
+      {loading ? 'Opening Google…' : label}
     </button>
   );
 }
