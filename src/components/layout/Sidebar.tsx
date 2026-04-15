@@ -47,12 +47,13 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="w-16 md:w-56 bg-gray-900 flex flex-col h-full shrink-0 no-print">
+    // Hidden on mobile — mobile navigation is handled by MobileBottomNav in AppShell
+    <aside className="hidden md:flex w-56 bg-gray-900 flex-col h-full shrink-0 no-print">
       {/* Logo */}
       <div className="px-3 py-4 border-b border-gray-700">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 bg-brand-red rounded-lg flex items-center justify-center text-white font-bold font-display text-sm shrink-0">P</div>
-          <div className="hidden md:block min-w-0">
+          <div className="min-w-0">
             <span className="text-white font-display font-semibold text-sm truncate block">
               {settings?.restaurantName ?? 'PeetPooja'}
             </span>
@@ -75,9 +76,9 @@ export function Sidebar() {
             )}
           >
             <span className="text-base shrink-0">{item.icon}</span>
-            <span className="hidden md:block">{item.label}</span>
+            <span>{item.label}</span>
             {item.to === '/inventory' && lowStockCount > 0 && (
-              <span className="hidden md:flex ml-auto bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 items-center justify-center">
+              <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
                 {lowStockCount}
               </span>
             )}
@@ -89,11 +90,11 @@ export function Sidebar() {
       <div className="px-3 py-3 border-t border-gray-700 space-y-2">
         <button
           onClick={handleSignOut}
-          className="hidden md:flex items-center gap-2 text-gray-400 hover:text-white text-xs w-full transition-colors"
+          className="flex items-center gap-2 text-gray-400 hover:text-white text-xs w-full transition-colors"
         >
           <span>🚪</span> Sign Out
         </button>
-        <p className="hidden md:block text-gray-500 text-xs">v2.0.0 — Cloud</p>
+        <p className="text-gray-500 text-xs">v2.0.0 — Cloud</p>
       </div>
     </aside>
   );

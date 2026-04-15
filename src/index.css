@@ -50,6 +50,27 @@
   }
 }
 
+/* Safe area padding for notched devices (iOS) */
+.safe-area-bottom {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+/* Hide scrollbar visually but keep functionality */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* Touch targets: ensure buttons are at least 44px tall on mobile */
+@media (max-width: 767px) {
+  .touch-target {
+    min-height: 44px;
+  }
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 4px;
