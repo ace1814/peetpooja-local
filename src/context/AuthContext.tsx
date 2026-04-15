@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { User } from 'firebase/auth';
 import { auth, onAuthStateChanged, signOut as firebaseSignOut } from '../lib/firebase';
-import { isConfigured, isWaiterMode, resetClient } from '../lib/supabase';
+import { isConfigured, isWaiterMode, resetClient, activateUser, deactivateUser } from '../lib/supabase';
 
 interface AuthContextValue {
   firebaseUser: User | null;
@@ -21,6 +21,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Firebase persists auth state in localStorage automatically across page loads
     const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        activateUser(user.uid); // switch to this user's Supabase credentials
+      } else {
+        deactivateUser();
+      }
       setFirebaseUser(user);
       setLoading(false);
     });
@@ -29,6 +34,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     await firebaseSignOut(auth);
+    deactivateUser(); // clears active UID + cached client; keeps localStorage creds intact
     // Clear waiter session (if any)
     sessionStorage.removeItem('sb_url');
     sessionStorage.removeItem('sb_anon_key');
