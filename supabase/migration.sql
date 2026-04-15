@@ -1,0 +1,185 @@
+-- ============================================================
+-- PeetPooja Billing — Supabase Migration
+-- Paste this entire file into your Supabase SQL Editor and run it.
+-- ============================================================
+
+-- ─── Tables ──────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS restaurant_settings (
+  id               integer PRIMARY KEY DEFAULT 1,
+  restaurant_name  text    DEFAULT 'My Restaurant',
+  address          text    DEFAULT '',
+  city             text    DEFAULT '',
+  state            text    DEFAULT '',
+  pincode          text    DEFAULT '',
+  phone            text    DEFAULT '',
+  email            text    DEFAULT '',
+  gstin            text    DEFAULT '',
+  fssai_number     text    DEFAULT '',
+  logo_base64      text    DEFAULT '',
+  invoice_prefix   text    DEFAULT 'INV',
+  current_invoice_seq integer DEFAULT 0,
+  default_gst_mode text    DEFAULT 'cgst_sgst',
+  enable_round_off boolean DEFAULT true,
+  print_copies     integer DEFAULT 1,
+  thermal_mode     boolean DEFAULT false,
+  print_size       text    DEFAULT '58mm',
+  footer_message   text    DEFAULT 'Thank you for your visit!',
+  auto_export_on_bill boolean DEFAULT false,
+  CONSTRAINT single_row CHECK (id = 1)
+);
+
+CREATE TABLE IF NOT EXISTS categories (
+  id         bigserial PRIMARY KEY,
+  name       text    NOT NULL,
+  sort_order integer DEFAULT 0,
+  color      text,
+  is_active  boolean DEFAULT true
+);
+
+CREATE TABLE IF NOT EXISTS menu_items (
+  id          bigserial PRIMARY KEY,
+  category_id bigint  REFERENCES categories(id) ON DELETE SET NULL,
+  name        text    NOT NULL,
+  short_name  text,
+  price       numeric NOT NULL DEFAULT 0,
+  mrp         numeric,
+  hsn_code    text    DEFAULT '996331',
+  gst_rate    numeric DEFAULT 5,
+  gst_inclusive boolean DEFAULT false,
+  unit        text    DEFAULT 'Plate',
+  is_veg      boolean DEFAULT true,
+  is_active   boolean DEFAULT true,
+  sort_order  integer DEFAULT 0,
+  description text
+);
+
+CREATE TABLE IF NOT EXISTS dining_tables (
+  id                 bigserial PRIMARY KEY,
+  table_number       text    NOT NULL,
+  section            text    DEFAULT 'Main Hall',
+  capacity           integer DEFAULT 4,
+  status             text    DEFAULT 'available',
+  current_invoice_id bigint
+);
+
+CREATE TABLE IF NOT EXISTS invoices (
+  id                   bigserial PRIMARY KEY,
+  invoice_number       text    NOT NULL UNIQUE,
+  order_type           text    NOT NULL DEFAULT 'takeaway',
+  table_id             bigint,
+  table_number         text,
+  customer_name        text,
+  customer_phone       text,
+  customer_gstin       text,
+  items                jsonb   NOT NULL DEFAULT '[]',
+  bill_discount_type   text    DEFAULT 'none',
+  bill_discount_value  numeric DEFAULT 0,
+  subtotal             numeric DEFAULT 0,
+  item_discount_total  numeric DEFAULT 0,
+  bill_discount_amount numeric DEFAULT 0,
+  taxable_amount       numeric DEFAULT 0,
+  cgst                 numeric DEFAULT 0,
+  sgst                 numeric DEFAULT 0,
+  igst                 numeric DEFAULT 0,
+  total_tax            numeric DEFAULT 0,
+  round_off            numeric DEFAULT 0,
+  grand_total          numeric DEFAULT 0,
+  payments             jsonb   NOT NULL DEFAULT '[]',
+  amount_received      numeric DEFAULT 0,
+  change_returned      numeric DEFAULT 0,
+  status               text    DEFAULT 'draft',
+  notes                text,
+  created_at           timestamptz DEFAULT now(),
+  updated_at           timestamptz DEFAULT now(),
+  printed_at           timestamptz
+);
+
+CREATE TABLE IF NOT EXISTS raw_materials (
+  id                  bigserial PRIMARY KEY,
+  name                text    NOT NULL,
+  unit                text    DEFAULT 'kg',
+  current_stock       numeric DEFAULT 0,
+  low_stock_threshold numeric DEFAULT 0,
+  cost_per_unit       numeric DEFAULT 0,
+  supplier            text,
+  is_active           boolean DEFAULT true
+);
+
+CREATE TABLE IF NOT EXISTS recipes (
+  id           bigserial PRIMARY KEY,
+  menu_item_id bigint REFERENCES menu_items(id) ON DELETE CASCADE,
+  ingredients  jsonb NOT NULL DEFAULT '[]'
+);
+
+CREATE TABLE IF NOT EXISTS purchase_orders (
+  id          bigserial PRIMARY KEY,
+  supplier    text,
+  status      text    DEFAULT 'pending',
+  items       jsonb   NOT NULL DEFAULT '[]',
+  total_cost  numeric DEFAULT 0,
+  notes       text,
+  created_at  timestamptz DEFAULT now(),
+  received_at timestamptz
+);
+
+-- ─── Row Level Security ───────────────────────────────────────
+
+ALTER TABLE restaurant_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE categories           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE menu_items           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dining_tables        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoices             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE raw_materials        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE recipes              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE purchase_orders      ENABLE ROW LEVEL SECURITY;
+
+-- Owner (authenticated) — full access to everything
+CREATE POLICY "owner_all" ON restaurant_settings FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "owner_all" ON categories           FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "owner_all" ON menu_items           FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "owner_all" ON dining_tables        FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "owner_all" ON invoices             FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "owner_all" ON raw_materials        FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "owner_all" ON recipes              FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "owner_all" ON purchase_orders      FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- Waiter (anon) — read menu/tables/settings; create+edit draft invoices only
+CREATE POLICY "waiter_read_settings"   ON restaurant_settings FOR SELECT TO anon USING (true);
+CREATE POLICY "waiter_read_categories" ON categories           FOR SELECT TO anon USING (is_active = true);
+CREATE POLICY "waiter_read_menu"       ON menu_items           FOR SELECT TO anon USING (is_active = true);
+CREATE POLICY "waiter_read_tables"     ON dining_tables        FOR SELECT TO anon USING (true);
+CREATE POLICY "waiter_update_tables"   ON dining_tables        FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "waiter_select_drafts"   ON invoices             FOR SELECT TO anon USING (status = 'draft');
+CREATE POLICY "waiter_insert_drafts"   ON invoices             FOR INSERT TO anon WITH CHECK (status = 'draft');
+CREATE POLICY "waiter_update_drafts"   ON invoices             FOR UPDATE TO anon USING (status = 'draft') WITH CHECK (status = 'draft');
+
+-- ─── Invoice Number Function ──────────────────────────────────
+
+CREATE OR REPLACE FUNCTION get_next_invoice_number()
+RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  next_seq integer;
+  prefix   text;
+  yr       text;
+BEGIN
+  UPDATE restaurant_settings
+    SET current_invoice_seq = current_invoice_seq + 1
+    WHERE id = 1
+    RETURNING current_invoice_seq, invoice_prefix INTO next_seq, prefix;
+  yr := extract(year FROM now())::text;
+  RETURN prefix || '-' || yr || '-' || lpad(next_seq::text, 4, '0');
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION get_next_invoice_number() TO anon;
+GRANT EXECUTE ON FUNCTION get_next_invoice_number() TO authenticated;
+
+-- ─── Default Settings Row ─────────────────────────────────────
+
+INSERT INTO restaurant_settings (id)
+VALUES (1)
+ON CONFLICT (id) DO NOTHING;

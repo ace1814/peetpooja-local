@@ -1,9 +1,11 @@
-import { NavLink } from 'react-router-dom';
-import { useLiveQuery } from 'dexie-react-hooks';
+import { useState, useEffect, useCallback } from 'react';
+import { NavLink, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
-import { db } from '../../db/schema';
+import { getSettings, getRawMaterials } from '../../lib/db';
+import { useAuth } from '../../context/AuthContext';
+import type { RestaurantSettings, RawMaterial } from '../../types';
 
-const navItems = [
+const ownerNavItems = [
   { to: '/billing',   icon: '🧾', label: 'Billing'   },
   { to: '/orders',    icon: '📋', label: 'Orders'    },
   { to: '/menu',      icon: '🍽️', label: 'Menu'      },
@@ -13,13 +15,36 @@ const navItems = [
   { to: '/settings',  icon: '⚙️', label: 'Settings'  },
 ];
 
-export function Sidebar() {
-  const lowStockCount = useLiveQuery(async () => {
-    const materials = await db.rawMaterials.filter(m => m.isActive).toArray();
-    return materials.filter(m => m.currentStock <= m.lowStockThreshold).length;
-  }, []) ?? 0;
+const waiterNavItems = [
+  { to: '/billing', icon: '🧾', label: 'Billing' },
+];
 
-  const settings = useLiveQuery(() => db.settings.get(1));
+export function Sidebar() {
+  const { isOwner, isWaiter, signOut } = useAuth();
+  const navigate = useNavigate();
+  const [settings, setSettings] = useState<RestaurantSettings | null>(null);
+  const [materials, setMaterials] = useState<RawMaterial[]>([]);
+
+  const fetchSettings = useCallback(async () => {
+    try { setSettings(await getSettings()); } catch {}
+  }, []);
+
+  const fetchMaterials = useCallback(async () => {
+    try { setMaterials(await getRawMaterials()); } catch {}
+  }, []);
+
+  useEffect(() => {
+    fetchSettings();
+    if (isOwner) fetchMaterials();
+  }, [fetchSettings, fetchMaterials, isOwner]);
+
+  const lowStockCount = materials.filter(m => m.isActive && m.currentStock <= m.lowStockThreshold).length;
+  const navItems = isWaiter ? waiterNavItems : ownerNavItems;
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/login', { replace: true });
+  };
 
   return (
     <aside className="w-16 md:w-56 bg-gray-900 flex flex-col h-full shrink-0 no-print">
@@ -27,9 +52,12 @@ export function Sidebar() {
       <div className="px-3 py-4 border-b border-gray-700">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 bg-brand-red rounded-lg flex items-center justify-center text-white font-bold font-display text-sm shrink-0">P</div>
-          <span className="hidden md:block text-white font-display font-semibold text-sm truncate">
-            {settings?.restaurantName ?? 'PeetPooja'}
-          </span>
+          <div className="hidden md:block min-w-0">
+            <span className="text-white font-display font-semibold text-sm truncate block">
+              {settings?.restaurantName ?? 'PeetPooja'}
+            </span>
+            {isWaiter && <span className="text-xs text-gray-400">Waiter</span>}
+          </div>
         </div>
       </div>
 
@@ -57,9 +85,15 @@ export function Sidebar() {
         ))}
       </nav>
 
-      {/* Version */}
-      <div className="px-3 py-3 border-t border-gray-700">
-        <p className="hidden md:block text-gray-500 text-xs">v1.0.0 — Local</p>
+      {/* Footer */}
+      <div className="px-3 py-3 border-t border-gray-700 space-y-2">
+        <button
+          onClick={handleSignOut}
+          className="hidden md:flex items-center gap-2 text-gray-400 hover:text-white text-xs w-full transition-colors"
+        >
+          <span>🚪</span> Sign Out
+        </button>
+        <p className="hidden md:block text-gray-500 text-xs">v2.0.0 — Cloud</p>
       </div>
     </aside>
   );

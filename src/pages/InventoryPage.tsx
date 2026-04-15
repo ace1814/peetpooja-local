@@ -1,13 +1,16 @@
-import { useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db/schema';
+import { useState, useEffect, useCallback } from 'react';
+import {
+  getRawMaterials, addRawMaterial, updateRawMaterial,
+  getMenuItems, getRecipes, upsertRecipe,
+  getPurchaseOrders, addPurchaseOrder, updatePurchaseOrder,
+} from '../lib/db';
 import { Button } from '../components/ui/Button';
 import { Input, Select } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { Badge } from '../components/ui/Badge';
 import { useToast } from '../components/ui/Toast';
 import { exportInventoryToXlsx } from '../utils/export';
-import type { RawMaterial, PurchaseOrder, StockUnit, PurchaseOrderItem } from '../types';
+import type { RawMaterial, PurchaseOrder, StockUnit, PurchaseOrderItem, MenuItem, Recipe, RecipeIngredient } from '../types';
 
 const UNITS: StockUnit[] = ['kg', 'g', 'L', 'ml', 'pcs', 'dozen', 'plate'];
 
@@ -19,10 +22,24 @@ export function InventoryPage() {
   const { showToast } = useToast();
   const [tab, setTab] = useState<'stock' | 'purchase-orders' | 'recipes'>('stock');
 
-  const materials = useLiveQuery(() => db.rawMaterials.toArray(), []) ?? [];
-  const menuItems = useLiveQuery(() => db.menuItems.filter(m => m.isActive).toArray(), []) ?? [];
-  const recipes = useLiveQuery(() => db.recipes.toArray(), []) ?? [];
-  const purchaseOrders = useLiveQuery(() => db.purchaseOrders.orderBy('createdAt').reverse().toArray(), []) ?? [];
+  const [materials, setMaterials] = useState<RawMaterial[]>([]);
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+
+  const fetchAll = useCallback(async () => {
+    try {
+      const [mats, items, recs, pos] = await Promise.all([
+        getRawMaterials(), getMenuItems(), getRecipes(), getPurchaseOrders(),
+      ]);
+      setMaterials(mats);
+      setMenuItems(items.filter(m => m.isActive));
+      setRecipes(recs);
+      setPurchaseOrders(pos);
+    } catch {}
+  }, []);
+
+  useEffect(() => { fetchAll(); }, [fetchAll]);
 
   // Stock tab state
   const [matModal, setMatModal] = useState(false);
@@ -51,24 +68,30 @@ export function InventoryPage() {
   // ─── Stock handlers ───
   const saveMat = async () => {
     if (!editingMat?.name) { showToast('Name required', 'error'); return; }
-    if (editingMat.id) {
-      await db.rawMaterials.update(editingMat.id, editingMat);
-    } else {
-      await db.rawMaterials.add(editingMat as RawMaterial);
-    }
-    showToast(editingMat.id ? 'Material updated' : 'Material added');
-    setMatModal(false);
+    try {
+      if (editingMat.id) {
+        await updateRawMaterial(editingMat.id, editingMat);
+      } else {
+        await addRawMaterial(editingMat as Omit<RawMaterial, 'id'>);
+      }
+      showToast(editingMat.id ? 'Material updated' : 'Material added');
+      setMatModal(false);
+      fetchAll();
+    } catch { showToast('Failed to save material', 'error'); }
   };
 
   const adjustStock = async () => {
     if (!adjustMat || !adjustQty) return;
     const delta = Number(adjustQty);
     const newStock = Math.max(0, adjustMat.currentStock + delta);
-    await db.rawMaterials.update(adjustMat.id!, { currentStock: newStock });
-    showToast(`Stock updated: ${adjustMat.name} → ${newStock} ${adjustMat.unit}`);
-    setAdjustModal(false);
-    setAdjustQty('');
-    setAdjustNote('');
+    try {
+      await updateRawMaterial(adjustMat.id!, { currentStock: newStock });
+      showToast(`Stock updated: ${adjustMat.name} → ${newStock} ${adjustMat.unit}`);
+      setAdjustModal(false);
+      setAdjustQty('');
+      setAdjustNote('');
+      fetchAll();
+    } catch { showToast('Failed to adjust stock', 'error'); }
   };
 
   // ─── PO handlers ───
@@ -89,32 +112,38 @@ export function InventoryPage() {
   const savePo = async () => {
     if (!poSupplier || poItems.length === 0) { showToast('Add supplier and at least one item', 'error'); return; }
     const totalCost = poItems.reduce((s, i) => s + i.quantityOrdered * i.costPerUnit, 0);
-    await db.purchaseOrders.add({
-      supplier: poSupplier, status: 'pending', items: poItems,
-      totalCost, notes: poNotes, createdAt: new Date(),
-    });
-    showToast('Purchase order created');
-    setPoModal(false); setPoSupplier(''); setPoNotes(''); setPoItems([]);
+    try {
+      await addPurchaseOrder({
+        supplier: poSupplier, status: 'pending', items: poItems,
+        totalCost, notes: poNotes, createdAt: new Date(),
+      });
+      showToast('Purchase order created');
+      setPoModal(false); setPoSupplier(''); setPoNotes(''); setPoItems([]);
+      fetchAll();
+    } catch { showToast('Failed to create purchase order', 'error'); }
   };
 
   const receivePo = async (po: PurchaseOrder) => {
-    await db.transaction('rw', [db.purchaseOrders, db.rawMaterials], async () => {
+    try {
+      // Update each raw material's stock sequentially
       for (const item of po.items) {
-        const mat = await db.rawMaterials.get(item.rawMaterialId);
+        const mat = materials.find(m => m.id === item.rawMaterialId);
         if (!mat) continue;
         const received = item.quantityOrdered;
-        await db.rawMaterials.update(item.rawMaterialId, {
+        await updateRawMaterial(item.rawMaterialId, {
           currentStock: mat.currentStock + received,
           costPerUnit: item.costPerUnit,
         });
       }
-      await db.purchaseOrders.update(po.id!, {
+      // Mark PO as received
+      await updatePurchaseOrder(po.id!, {
         status: 'received',
         receivedAt: new Date(),
         items: po.items.map(i => ({ ...i, quantityReceived: i.quantityOrdered })),
       });
-    });
-    showToast('Purchase order received — stock updated');
+      showToast('Purchase order received — stock updated');
+      fetchAll();
+    } catch { showToast('Failed to receive purchase order', 'error'); }
   };
 
   // ─── Recipe handlers ───
@@ -123,19 +152,17 @@ export function InventoryPage() {
       showToast('Select menu item and add ingredients', 'error'); return;
     }
     const menuId = Number(recipeMenuItem);
-    const existing = await db.recipes.where('menuItemId').equals(menuId).first();
-    const ingredients = recipeIngredients.map(i => ({
+    const ingredients: RecipeIngredient[] = recipeIngredients.map(i => ({
       rawMaterialId: Number(i.rawMaterialId),
       quantity: Number(i.quantity),
       unit: i.unit,
     }));
-    if (existing) {
-      await db.recipes.update(existing.id!, { ingredients });
-    } else {
-      await db.recipes.add({ menuItemId: menuId, ingredients });
-    }
-    showToast('Recipe saved');
-    setRecipeModal(false); setRecipeMenuItem(''); setRecipeIngredients([]);
+    try {
+      await upsertRecipe(menuId, ingredients);
+      showToast('Recipe saved');
+      setRecipeModal(false); setRecipeMenuItem(''); setRecipeIngredients([]);
+      fetchAll();
+    } catch { showToast('Failed to save recipe', 'error'); }
   };
 
   return (
@@ -239,7 +266,7 @@ export function InventoryPage() {
                       {po.status}
                     </Badge>
                     {po.status === 'pending' && (
-                      <Button variant="success" size="sm" onClick={async () => await receivePo(po)}>Receive</Button>
+                      <Button variant="success" size="sm" onClick={() => receivePo(po)}>Receive</Button>
                     )}
                   </div>
                 </div>

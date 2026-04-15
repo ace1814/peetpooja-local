@@ -1,26 +1,29 @@
-import { useState, useMemo, useRef } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useReactToPrint } from 'react-to-print';
-import { db } from '../db/schema';
+import {
+  getSettings, getCategories, getMenuItems, getDiningTables,
+  getInvoice, updateInvoice, addInvoice, updateDiningTable, getNextInvoiceNumber,
+} from '../lib/db';
+import { getSupabase } from '../lib/supabase';
 import { useBillingStore } from '../store/billingStore';
 import { calcBillTotals, calcItemLine } from '../utils/gst';
 import { formatINR } from '../utils/currency';
-import { getNextInvoiceNumber } from '../utils/invoiceNumber';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { PaymentModal } from '../components/payment/PaymentModal';
 import { InvoiceTemplate } from '../components/print/InvoiceTemplate';
 import { useToast } from '../components/ui/Toast';
-import type { MenuItem, DiningTable, InvoiceItem, Invoice } from '../types';
+import type { MenuItem, DiningTable, InvoiceItem, Invoice, Category, RestaurantSettings } from '../types';
 import clsx from 'clsx';
 
 export function BillingPage() {
   const store = useBillingStore();
   const { showToast } = useToast();
-  const settings = useLiveQuery(() => db.settings.get(1));
-  const categories = useLiveQuery(() => db.categories.filter(c => c.isActive).toArray().then(r => r.sort((a,b) => a.sortOrder - b.sortOrder)), []) ?? [];
-  const allItems = useLiveQuery(() => db.menuItems.filter(m => m.isActive).toArray(), []) ?? [];
-  const tables = useLiveQuery(() => db.diningTables.toArray(), []) ?? [];
+
+  const [settings, setSettings] = useState<RestaurantSettings | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [allItems, setAllItems] = useState<MenuItem[]>([]);
+  const [tables, setTables] = useState<DiningTable[]>([]);
 
   const [activeCat, setActiveCat] = useState<number | 'all'>('all');
   const [search, setSearch] = useState('');
@@ -30,6 +33,36 @@ export function BillingPage() {
   const printRef = useRef<HTMLDivElement>(null);
   const [printInvoice, setPrintInvoice] = useState<Invoice | null>(null);
   const triggerPrint = useReactToPrint({ contentRef: printRef });
+
+  // ─── Fetch all data ───
+  const fetchData = useCallback(async () => {
+    try {
+      const [sett, cats, items, tbls] = await Promise.all([
+        getSettings(), getCategories(), getMenuItems(), getDiningTables(),
+      ]);
+      setSettings(sett);
+      setCategories(cats.filter(c => c.isActive).sort((a, b) => a.sortOrder - b.sortOrder));
+      setAllItems(items.filter(m => m.isActive));
+      setTables(tbls);
+    } catch {}
+  }, []);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  // ─── Realtime subscription for table status updates ───
+  useEffect(() => {
+    const sb = getSupabase();
+    if (!sb) return;
+
+    const channel = sb
+      .channel('billing-tables')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'dining_tables' }, () => {
+        getDiningTables().then(setTables).catch(() => {});
+      })
+      .subscribe();
+
+    return () => { sb.removeChannel(channel); };
+  }, []);
 
   const gstMode = settings?.defaultGstMode ?? 'cgst_sgst';
 
@@ -59,30 +92,28 @@ export function BillingPage() {
   const handleAddItem = (item: MenuItem) => store.addItem(item, gstMode);
 
   const handleTableSelect = async (table: DiningTable) => {
-    // Tapping the already-selected table → no-op
     if (store.selectedTable?.id === table.id) return;
 
-    // Occupied with a saved draft → load that order
     if (table.status === 'occupied' && table.currentInvoiceId) {
-      const draft = await db.invoices.get(table.currentInvoiceId);
-      if (draft && draft.status === 'draft') {
-        store.loadDraft(draft, table);
-        showToast(`Loaded order for Table ${table.tableNumber}`, 'info');
-        return;
-      }
+      try {
+        const draft = await getInvoice(table.currentInvoiceId);
+        if (draft && draft.status === 'draft') {
+          store.loadDraft(draft, table);
+          showToast(`Loaded order for Table ${table.tableNumber}`, 'info');
+          return;
+        }
+      } catch {}
     }
 
-    // Available / reserved → switch to it
     if (table.status === 'available' || table.status === 'reserved') {
       if (store.draftInvoiceId && store.selectedTable) {
-        // Let user know the previous draft is safely stored in DB
         showToast(`Order ${store.draftInvoiceNumber} saved for Table ${store.selectedTable.tableNumber}`, 'info');
       }
       store.switchToTable(table);
     }
   };
 
-  // Save order as draft, mark table occupied
+  // ─── Save order as draft, mark table occupied ───
   const handleSaveOrder = async () => {
     if (store.cartItems.length === 0) { showToast('Add items first', 'error'); return; }
     if (store.orderType === 'dine-in' && !store.selectedTable) { showToast('Select a table first', 'error'); return; }
@@ -97,22 +128,18 @@ export function BillingPage() {
       const now = new Date();
 
       if (store.draftInvoiceId) {
-        // Update existing draft
-        await db.transaction('rw', [db.invoices], async () => {
-          await db.invoices.update(store.draftInvoiceId!, {
-            items: invoiceItems,
-            billDiscountType: store.billDiscountType,
-            billDiscountValue: store.billDiscountValue,
-            ...totals,
-            notes: store.notes || undefined,
-            updatedAt: now,
-          });
+        await updateInvoice(store.draftInvoiceId, {
+          items: invoiceItems,
+          billDiscountType: store.billDiscountType,
+          billDiscountValue: store.billDiscountValue,
+          ...totals,
+          notes: store.notes || undefined,
+          updatedAt: now,
         });
         showToast(`Order updated — ${store.draftInvoiceNumber}`);
       } else {
-        // New draft
         const invoiceNumber = await getNextInvoiceNumber();
-        const invoice: Invoice = {
+        const invoice: Omit<Invoice, 'id'> = {
           invoiceNumber,
           orderType: store.orderType,
           tableId: store.selectedTable?.id,
@@ -133,18 +160,16 @@ export function BillingPage() {
           updatedAt: now,
         };
 
-        await db.transaction('rw', [db.invoices, db.diningTables], async () => {
-          const id = await db.invoices.add(invoice);
-          if (store.selectedTable?.id) {
-            await db.diningTables.update(store.selectedTable.id, {
-              status: 'occupied',
-              currentInvoiceId: id as number,
-            });
-          }
-          // Update store with saved draft info
-          store.loadDraft({ ...invoice, id: id as number }, store.selectedTable);
-        });
+        const id = await addInvoice(invoice);
 
+        if (store.selectedTable?.id) {
+          await updateDiningTable(store.selectedTable.id, {
+            status: 'occupied',
+            currentInvoiceId: id,
+          });
+        }
+
+        store.loadDraft({ ...invoice, id }, store.selectedTable);
         showToast(`Order saved — ${invoiceNumber}`);
       }
     } catch (err) {
@@ -155,13 +180,15 @@ export function BillingPage() {
     }
   };
 
-  // Print bill without collecting payment
+  // ─── Print bill without collecting payment ───
   const handlePrintBill = async () => {
     if (!store.draftInvoiceId) { showToast('Save the order first', 'error'); return; }
-    const invoice = await db.invoices.get(store.draftInvoiceId);
-    if (!invoice) return;
-    setPrintInvoice(invoice);
-    setTimeout(() => triggerPrint(), 100);
+    try {
+      const invoice = await getInvoice(store.draftInvoiceId);
+      if (!invoice) return;
+      setPrintInvoice(invoice);
+      setTimeout(() => triggerPrint(), 100);
+    } catch {}
   };
 
   const isDineIn = store.orderType === 'dine-in';
@@ -172,7 +199,7 @@ export function BillingPage() {
     <div className="flex h-full overflow-hidden">
       {/* Hidden print template */}
       <div style={{ position: 'absolute', left: '-9999px', top: 0 }}>
-        <InvoiceTemplate ref={printRef} invoice={printInvoice} settings={settings ?? null} />
+        <InvoiceTemplate ref={printRef} invoice={printInvoice} settings={settings} />
       </div>
 
       {/* ─── Left: Menu Panel ─── */}
@@ -403,20 +430,17 @@ export function BillingPage() {
               onChange={e => store.setNotes(e.target.value)} rows={1}
               className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 resize-none focus:outline-none focus:ring-1 focus:ring-brand-red" />
 
-            {/* Action buttons — different for dine-in vs takeaway */}
+            {/* Action buttons */}
             {isDineIn ? (
               <div className="space-y-2 pt-1">
-                {/* Save / Update order */}
                 <Button size="lg" variant="secondary" className="w-full" onClick={handleSaveOrder} disabled={saving}>
                   {saving ? 'Saving…' : hasDraft ? '💾 Update Order' : '💾 Save Order'}
                 </Button>
-                {/* Print bill (only after saved) */}
                 {hasDraft && (
                   <Button size="lg" variant="secondary" className="w-full" onClick={handlePrintBill}>
                     🖨 Print Bill
                   </Button>
                 )}
-                {/* Collect payment (only after saved) */}
                 {hasDraft && (
                   <Button size="lg" className="w-full" onClick={() => setPaymentOpen(true)}>
                     💳 Collect Payment

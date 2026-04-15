@@ -1,6 +1,5 @@
-import { useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db/schema';
+import { useState, useEffect, useCallback } from 'react';
+import { getDiningTables, addDiningTable, updateDiningTable, deleteDiningTable } from '../lib/db';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
@@ -17,33 +16,48 @@ const statusColors: Record<TableStatus, string> = {
 
 export function TablesPage() {
   const { showToast } = useToast();
-  const tables = useLiveQuery(() => db.diningTables.toArray(), []) ?? [];
+  const [tables, setTables] = useState<DiningTable[]>([]);
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<Partial<DiningTable> | null>(null);
+
+  const fetchTables = useCallback(async () => {
+    try { setTables(await getDiningTables()); } catch {}
+  }, []);
+
+  useEffect(() => { fetchTables(); }, [fetchTables]);
 
   const sections = Array.from(new Set(tables.map(t => t.section)));
 
   const save = async () => {
     if (!editing?.tableNumber || !editing.section) { showToast('Table number and section required', 'error'); return; }
-    if (editing.id) {
-      await db.diningTables.update(editing.id, editing);
-      showToast('Table updated');
-    } else {
-      await db.diningTables.add({ ...editing as DiningTable, status: 'available' });
-      showToast('Table added');
-    }
-    setModal(false);
+    try {
+      if (editing.id) {
+        await updateDiningTable(editing.id, editing);
+        showToast('Table updated');
+      } else {
+        await addDiningTable({ ...editing as DiningTable, status: 'available' });
+        showToast('Table added');
+      }
+      setModal(false);
+      fetchTables();
+    } catch { showToast('Failed to save table', 'error'); }
   };
 
   const deleteTable = async (table: DiningTable) => {
     if (table.status === 'occupied') { showToast('Cannot delete an occupied table', 'error'); return; }
     if (!confirm(`Delete table ${table.tableNumber}?`)) return;
-    await db.diningTables.delete(table.id!);
-    showToast('Table deleted');
+    try {
+      await deleteDiningTable(table.id!);
+      showToast('Table deleted');
+      fetchTables();
+    } catch { showToast('Failed to delete', 'error'); }
   };
 
   const setStatus = async (table: DiningTable, status: TableStatus) => {
-    await db.diningTables.update(table.id!, { status });
+    try {
+      await updateDiningTable(table.id!, { status });
+      fetchTables();
+    } catch { showToast('Failed to update status', 'error'); }
   };
 
   return (

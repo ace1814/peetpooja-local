@@ -1,20 +1,29 @@
-import { useState, useEffect } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db/schema';
+import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { getSettings, updateSettings } from '../lib/db';
 import { Input, Select } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/Toast';
+import { useAuth } from '../context/AuthContext';
 import type { RestaurantSettings } from '../types';
 
 export function SettingsPage() {
   const { showToast } = useToast();
-  const settings = useLiveQuery(() => db.settings.get(1));
+  const { signOut } = useAuth();
+  const navigate = useNavigate();
   const [form, setForm] = useState<Partial<RestaurantSettings>>({});
   const [saving, setSaving] = useState(false);
+  const [waiterLink, setWaiterLink] = useState('');
+  const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    if (settings) setForm(settings);
-  }, [settings]);
+  const fetchSettings = useCallback(async () => {
+    try {
+      const s = await getSettings();
+      if (s) setForm(s);
+    } catch {}
+  }, []);
+
+  useEffect(() => { fetchSettings(); }, [fetchSettings]);
 
   const update = (key: keyof RestaurantSettings, value: unknown) =>
     setForm(f => ({ ...f, [key]: value }));
@@ -31,7 +40,7 @@ export function SettingsPage() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await db.settings.update(1, form);
+      await updateSettings(form);
       showToast('Settings saved!');
     } catch {
       showToast('Failed to save', 'error');
@@ -40,7 +49,27 @@ export function SettingsPage() {
     }
   };
 
-  if (!settings) return <div className="p-6 text-gray-400">Loading…</div>;
+  const generateWaiterLink = () => {
+    const sbUrl = localStorage.getItem('sb_url');
+    const sbKey = localStorage.getItem('sb_anon_key');
+    if (!sbUrl || !sbKey) { showToast('Database not configured', 'error'); return; }
+    const token = btoa(JSON.stringify({ url: sbUrl, key: sbKey, restaurantName: form.restaurantName ?? '' }));
+    setWaiterLink(`${window.location.origin}/join?token=${token}`);
+  };
+
+  const copyWaiterLink = async () => {
+    await navigator.clipboard.writeText(waiterLink);
+    setCopied(true);
+    showToast('Link copied!');
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/login', { replace: true });
+  };
+
+  if (!form.restaurantName && !form.invoicePrefix) return <div className="p-6 text-gray-400">Loading…</div>;
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
@@ -110,7 +139,39 @@ export function SettingsPage() {
           </div>
         </Section>
 
-        <div className="flex justify-end">
+        {/* Waiter Access */}
+        <Section title="Waiter Access">
+          <p className="text-sm text-gray-500 mb-4">
+            Share this link with your waiters. They can open it on their phone to take orders — no login required.
+          </p>
+          <div className="space-y-3">
+            <Button variant="secondary" onClick={generateWaiterLink}>
+              🔗 Generate Waiter Link
+            </Button>
+            {waiterLink && (
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <input
+                    readOnly
+                    value={waiterLink}
+                    className="flex-1 text-xs font-mono border border-gray-200 rounded-lg px-3 py-2 bg-gray-50 text-gray-600"
+                  />
+                  <Button variant="secondary" onClick={copyWaiterLink}>
+                    {copied ? '✓' : 'Copy'}
+                  </Button>
+                </div>
+                <p className="text-xs text-gray-400">
+                  ⚠️ Anyone with this link can take orders on your tables. Share only with trusted staff.
+                </p>
+              </div>
+            )}
+          </div>
+        </Section>
+
+        <div className="flex items-center justify-between">
+          <Button variant="ghost" className="text-gray-500 hover:text-red-600" onClick={handleSignOut}>
+            🚪 Sign Out
+          </Button>
           <Button size="lg" onClick={handleSave} disabled={saving}>
             {saving ? 'Saving…' : 'Save Settings'}
           </Button>

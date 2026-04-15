@@ -1,17 +1,18 @@
-import { useState, useRef, useMemo } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
+import { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import { useReactToPrint } from 'react-to-print';
-import { db } from '../../db/schema';
+import {
+  getSettings, updateInvoice, addInvoice,
+  updateDiningTable, getRecipeByMenuItemId, updateRawMaterial, getRawMaterials,
+  getNextInvoiceNumber,
+} from '../../lib/db';
 import { useBillingStore } from '../../store/billingStore';
-import { getNextInvoiceNumber } from '../../utils/invoiceNumber';
 import { calcItemLine } from '../../utils/gst';
 import { useToast } from '../ui/Toast';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { InvoiceTemplate } from '../print/InvoiceTemplate';
-import type { BillTotals, Invoice, InvoiceItem, PaymentMethod } from '../../types';
+import type { BillTotals, Invoice, InvoiceItem, PaymentMethod, RestaurantSettings } from '../../types';
 import clsx from 'clsx';
-
 
 interface Props {
   open: boolean;
@@ -25,8 +26,14 @@ export function PaymentModal({ open, onClose, totals }: Props) {
   const store = useBillingStore();
   const { draftInvoiceId } = store;
   const { showToast } = useToast();
-  const settings = useLiveQuery(() => db.settings.get(1));
+  const [settings, setSettings] = useState<RestaurantSettings | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
+
+  const fetchSettings = useCallback(async () => {
+    try { setSettings(await getSettings()); } catch {}
+  }, []);
+
+  useEffect(() => { if (open) fetchSettings(); }, [open, fetchSettings]);
 
   const [tab, setTab] = useState<Tab>('cash');
   const [cashTendered, setCashTendered] = useState('');
@@ -49,7 +56,6 @@ export function PaymentModal({ open, onClose, totals }: Props) {
     let amountReceived = splitPaid;
     let changeReturned = 0;
 
-    // Build payment from current tab if not in split mode
     if (tab !== 'split') {
       if (tab === 'cash') {
         const tendered = Number(cashTendered) || totals.grandTotal;
@@ -72,63 +78,80 @@ export function PaymentModal({ open, onClose, totals }: Props) {
     try {
       const now = new Date();
 
-      // Build invoice items from cart
       const invoiceItems: InvoiceItem[] = store.cartItems.map(c => {
         const line = calcItemLine(c.unitPrice, c.quantity, c.discountType, c.discountValue, c.gstRate, c.gstInclusive, gstMode);
         return {
-          menuItemId: c.menuItemId,
-          name: c.name,
-          hsnCode: c.hsnCode,
-          gstRate: c.gstRate,
-          gstInclusive: c.gstInclusive,
-          unitPrice: c.unitPrice,
-          quantity: c.quantity,
-          discountType: c.discountType,
-          discountValue: c.discountValue,
-          ...line,
+          menuItemId: c.menuItemId, name: c.name, hsnCode: c.hsnCode,
+          gstRate: c.gstRate, gstInclusive: c.gstInclusive,
+          unitPrice: c.unitPrice, quantity: c.quantity,
+          discountType: c.discountType, discountValue: c.discountValue, ...line,
         };
       });
 
       let invoice: Invoice;
 
+      // ─── Deduct inventory (sequential, no transaction) ───
+      const deductInventory = async () => {
+        const allMats = await getRawMaterials();
+        for (const item of store.cartItems) {
+          const recipe = await getRecipeByMenuItemId(item.menuItemId);
+          if (!recipe) continue;
+          for (const ing of recipe.ingredients) {
+            const material = allMats.find(m => m.id === ing.rawMaterialId);
+            if (!material) continue;
+            const deduct = ing.quantity * item.quantity;
+            const newStock = Math.max(0, material.currentStock - deduct);
+            await updateRawMaterial(ing.rawMaterialId, { currentStock: newStock });
+          }
+        }
+      };
+
       if (draftInvoiceId) {
         // Dine-in: update existing draft → paid
-        await db.transaction('rw', [db.invoices, db.diningTables, db.rawMaterials, db.recipes], async () => {
-          await db.invoices.update(draftInvoiceId, {
-            items: invoiceItems,
-            billDiscountType: store.billDiscountType,
-            billDiscountValue: store.billDiscountValue,
-            ...totals,
-            payments: paymentEntries,
-            amountReceived,
-            changeReturned,
-            status: 'paid',
-            notes: store.notes || undefined,
-            updatedAt: now,
-            printedAt: now,
-          });
-
-          // Free up table
-          if (store.selectedTable?.id) {
-            await db.diningTables.update(store.selectedTable.id, { status: 'available', currentInvoiceId: undefined });
-          }
-
-          // Deduct inventory via recipes
-          for (const item of store.cartItems) {
-            const recipe = await db.recipes.where('menuItemId').equals(item.menuItemId).first();
-            if (!recipe) continue;
-            for (const ing of recipe.ingredients) {
-              const material = await db.rawMaterials.get(ing.rawMaterialId);
-              if (!material) continue;
-              const deduct = ing.quantity * item.quantity;
-              const newStock = Math.max(0, material.currentStock - deduct);
-              await db.rawMaterials.update(ing.rawMaterialId, { currentStock: newStock });
-            }
-          }
+        await updateInvoice(draftInvoiceId, {
+          items: invoiceItems,
+          billDiscountType: store.billDiscountType,
+          billDiscountValue: store.billDiscountValue,
+          ...totals,
+          payments: paymentEntries,
+          amountReceived,
+          changeReturned,
+          status: 'paid',
+          notes: store.notes || undefined,
+          updatedAt: now,
+          printedAt: now,
         });
 
-        const saved = await db.invoices.get(draftInvoiceId);
-        invoice = saved!;
+        // Free up table
+        if (store.selectedTable?.id) {
+          await updateDiningTable(store.selectedTable.id, { status: 'available', currentInvoiceId: undefined });
+        }
+
+        await deductInventory();
+
+        // Fetch updated invoice for printing
+        invoice = {
+          id: draftInvoiceId,
+          invoiceNumber: store.draftInvoiceNumber!,
+          orderType: store.orderType,
+          tableId: store.selectedTable?.id,
+          tableNumber: store.selectedTable?.tableNumber,
+          customerName: store.customerName || undefined,
+          customerPhone: store.customerPhone || undefined,
+          customerGstin: store.customerGstin || undefined,
+          items: invoiceItems,
+          billDiscountType: store.billDiscountType,
+          billDiscountValue: store.billDiscountValue,
+          ...totals,
+          payments: paymentEntries,
+          amountReceived,
+          changeReturned,
+          status: 'paid',
+          notes: store.notes || undefined,
+          createdAt: now,
+          updatedAt: now,
+          printedAt: now,
+        };
       } else {
         // Takeaway / new order: create fresh invoice
         const invoiceNumber = await getNextInvoiceNumber();
@@ -155,36 +178,20 @@ export function PaymentModal({ open, onClose, totals }: Props) {
           printedAt: now,
         };
 
-        await db.transaction('rw', [db.invoices, db.diningTables, db.rawMaterials, db.recipes], async () => {
-          const id = await db.invoices.add(invoice);
-          invoice.id = id as number;
+        const id = await addInvoice(invoice);
+        invoice.id = id;
 
-          // Free up table
-          if (store.selectedTable?.id) {
-            await db.diningTables.update(store.selectedTable.id, { status: 'available', currentInvoiceId: undefined });
-          }
+        // Free up table if any
+        if (store.selectedTable?.id) {
+          await updateDiningTable(store.selectedTable.id, { status: 'available', currentInvoiceId: undefined });
+        }
 
-          // Deduct inventory via recipes
-          for (const item of store.cartItems) {
-            const recipe = await db.recipes.where('menuItemId').equals(item.menuItemId).first();
-            if (!recipe) continue;
-            for (const ing of recipe.ingredients) {
-              const material = await db.rawMaterials.get(ing.rawMaterialId);
-              if (!material) continue;
-              const deduct = ing.quantity * item.quantity;
-              const newStock = Math.max(0, material.currentStock - deduct);
-              await db.rawMaterials.update(ing.rawMaterialId, { currentStock: newStock });
-            }
-          }
-        });
+        await deductInventory();
       }
 
       setSavedInvoice(invoice);
       showToast(`Bill ${invoice.invoiceNumber} saved!`);
-
-      // Trigger print
       setTimeout(() => triggerPrint(), 100);
-
       store.resetOrder();
       onClose();
     } catch (err) {
@@ -201,7 +208,7 @@ export function PaymentModal({ open, onClose, totals }: Props) {
     <>
       {/* Hidden print template */}
       <div style={{ position: 'absolute', left: '-9999px', top: 0 }}>
-        <InvoiceTemplate ref={printRef} invoice={savedInvoice} settings={settings ?? null} />
+        <InvoiceTemplate ref={printRef} invoice={savedInvoice} settings={settings} />
       </div>
 
       <Modal open={open} onClose={onClose} title="Payment" size="md">
@@ -276,7 +283,7 @@ export function PaymentModal({ open, onClose, totals }: Props) {
                   <option value="upi">UPI</option>
                   <option value="wallet">Wallet</option>
                 </select>
-                <input type="number" value={splitAmount} onChange={e => setSplitAmount(e.target.value)} placeholder={`₹ amount`} className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-red" />
+                <input type="number" value={splitAmount} onChange={e => setSplitAmount(e.target.value)} placeholder="₹ amount" className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-red" />
                 <Button
                   variant="secondary"
                   onClick={() => {

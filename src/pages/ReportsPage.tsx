@@ -1,10 +1,9 @@
-import { useState, useMemo } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db/schema';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { getInvoices, getMenuItems, getRawMaterials, getPurchaseOrders } from '../lib/db';
 import { Button } from '../components/ui/Button';
 import { exportFullDataToXlsx, exportInvoicesToXlsx } from '../utils/export';
 import { startOfDay, endOfDay, subDays, format, isWithinInterval } from 'date-fns';
-import type { Invoice } from '../types';
+import type { Invoice, MenuItem, RawMaterial, PurchaseOrder } from '../types';
 
 type Range = 'today' | 'week' | 'month' | 'custom';
 
@@ -13,10 +12,24 @@ export function ReportsPage() {
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'));
 
-  const invoices = useLiveQuery(() => db.invoices.toArray(), []) ?? [];
-  const menuItems = useLiveQuery(() => db.menuItems.toArray(), []) ?? [];
-  const rawMaterials = useLiveQuery(() => db.rawMaterials.toArray(), []) ?? [];
-  const purchaseOrders = useLiveQuery(() => db.purchaseOrders.toArray(), []) ?? [];
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [rawMaterials, setRawMaterials] = useState<RawMaterial[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+
+  const fetchAll = useCallback(async () => {
+    try {
+      const [invs, items, mats, pos] = await Promise.all([
+        getInvoices(), getMenuItems(), getRawMaterials(), getPurchaseOrders(),
+      ]);
+      setInvoices(invs);
+      setMenuItems(items);
+      setRawMaterials(mats);
+      setPurchaseOrders(pos);
+    } catch {}
+  }, []);
+
+  useEffect(() => { fetchAll(); }, [fetchAll]);
 
   const { from, to } = useMemo(() => {
     const now = new Date();
@@ -51,7 +64,6 @@ export function ReportsPage() {
     return { revenue, orders, avgBill, cash, card, upi, wallet, cgst, sgst, igst, taxable, dineIn, takeaway };
   }, [filtered]);
 
-  // Item-wise breakdown
   const itemSales = useMemo(() => {
     const map = new Map<string, { name: string; qty: number; revenue: number }>();
     for (const inv of filtered) {
@@ -73,6 +85,9 @@ export function ReportsPage() {
   ].filter(p => p.value > 0);
 
   const maxPayment = Math.max(...paymentData.map(p => p.value), 1);
+
+  // Suppress unused variable warnings for export
+  void menuItems; void rawMaterials; void purchaseOrders;
 
   return (
     <div className="p-6 space-y-6">

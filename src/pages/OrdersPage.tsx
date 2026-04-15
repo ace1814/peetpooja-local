@@ -1,7 +1,6 @@
-import { useState, useRef } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useReactToPrint } from 'react-to-print';
-import { db } from '../db/schema';
+import { getInvoices, updateInvoice, getSettings } from '../lib/db';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
@@ -9,12 +8,12 @@ import { InvoiceTemplate } from '../components/print/InvoiceTemplate';
 import { exportInvoicesToXlsx } from '../utils/export';
 import { useToast } from '../components/ui/Toast';
 import { format } from 'date-fns';
-import type { Invoice } from '../types';
+import type { Invoice, RestaurantSettings } from '../types';
 
 export function OrdersPage() {
   const { showToast } = useToast();
-  const settings = useLiveQuery(() => db.settings.get(1));
-  const invoices = useLiveQuery(() => db.invoices.orderBy('createdAt').reverse().toArray(), []) ?? [];
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [settings, setSettings] = useState<RestaurantSettings | null>(null);
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'cancelled' | 'draft'>('all');
@@ -23,6 +22,16 @@ export function OrdersPage() {
   const [printInvoice, setPrintInvoice] = useState<Invoice | null>(null);
 
   const triggerPrint = useReactToPrint({ contentRef: printRef });
+
+  const fetchAll = useCallback(async () => {
+    try {
+      const [invs, sett] = await Promise.all([getInvoices(), getSettings()]);
+      setInvoices(invs);
+      setSettings(sett);
+    } catch {}
+  }, []);
+
+  useEffect(() => { fetchAll(); }, [fetchAll]);
 
   const filtered = invoices.filter(inv => {
     const matchSearch =
@@ -40,8 +49,11 @@ export function OrdersPage() {
 
   const handleCancel = async (inv: Invoice) => {
     if (!confirm(`Cancel invoice ${inv.invoiceNumber}?`)) return;
-    await db.invoices.update(inv.id!, { status: 'cancelled', updatedAt: new Date() });
-    showToast('Invoice cancelled');
+    try {
+      await updateInvoice(inv.id!, { status: 'cancelled', updatedAt: new Date() });
+      showToast('Invoice cancelled');
+      fetchAll();
+    } catch { showToast('Failed to cancel invoice', 'error'); }
   };
 
   const statusBadgeColor = (status: string) => {
@@ -54,7 +66,7 @@ export function OrdersPage() {
     <div className="p-6">
       {/* Hidden print template */}
       <div style={{ position: 'absolute', left: '-9999px', top: 0 }}>
-        <InvoiceTemplate ref={printRef} invoice={printInvoice} settings={settings ?? null} />
+        <InvoiceTemplate ref={printRef} invoice={printInvoice} settings={settings} />
       </div>
 
       {/* Filters */}

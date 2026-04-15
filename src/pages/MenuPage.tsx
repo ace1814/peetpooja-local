@@ -1,6 +1,5 @@
-import { useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db/schema';
+import { useState, useEffect, useCallback } from 'react';
+import { getCategories, addCategory, updateCategory, deleteCategory, getMenuItemCount, getMenuItems, addMenuItem, updateMenuItem, deleteMenuItem } from '../lib/db';
 import { Button } from '../components/ui/Button';
 import { Input, Select } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
@@ -17,8 +16,8 @@ const defaultItem: Omit<MenuItem, 'id'> = {
 
 export function MenuPage() {
   const { showToast } = useToast();
-  const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').toArray(), []) ?? [];
-  const menuItems = useLiveQuery(() => db.menuItems.orderBy('name').toArray(), []) ?? [];
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
 
   const [activeTab, setActiveTab] = useState<'items' | 'categories'>('items');
   const [itemModal, setItemModal] = useState(false);
@@ -27,6 +26,16 @@ export function MenuPage() {
   const [editingCat, setEditingCat] = useState<Partial<Category> | null>(null);
   const [filterCat, setFilterCat] = useState<number | 'all'>('all');
   const [search, setSearch] = useState('');
+
+  const fetchCategories = useCallback(async () => {
+    try { setCategories(await getCategories()); } catch {}
+  }, []);
+
+  const fetchMenuItems = useCallback(async () => {
+    try { setMenuItems(await getMenuItems()); } catch {}
+  }, []);
+
+  useEffect(() => { fetchCategories(); fetchMenuItems(); }, [fetchCategories, fetchMenuItems]);
 
   const filteredItems = menuItems.filter(m => {
     const matchCat = filterCat === 'all' || m.categoryId === filterCat;
@@ -42,42 +51,57 @@ export function MenuPage() {
 
   const saveItem = async () => {
     if (!editingItem?.name || !editingItem.price) { showToast('Name and price required', 'error'); return; }
-    if (editingItem.id) {
-      await db.menuItems.update(editingItem.id, editingItem);
-    } else {
-      await db.menuItems.add(editingItem as MenuItem);
-    }
-    showToast(editingItem.id ? 'Item updated' : 'Item added');
-    setItemModal(false);
+    try {
+      if (editingItem.id) {
+        await updateMenuItem(editingItem.id, editingItem);
+      } else {
+        await addMenuItem(editingItem as MenuItem);
+      }
+      showToast(editingItem.id ? 'Item updated' : 'Item added');
+      setItemModal(false);
+      fetchMenuItems();
+    } catch { showToast('Failed to save item', 'error'); }
   };
 
   const toggleItemActive = async (item: MenuItem) => {
-    await db.menuItems.update(item.id!, { isActive: !item.isActive });
+    try {
+      await updateMenuItem(item.id!, { isActive: !item.isActive });
+      fetchMenuItems();
+    } catch { showToast('Failed to update', 'error'); }
   };
 
   const deleteItem = async (item: MenuItem) => {
     if (!confirm(`Delete "${item.name}"?`)) return;
-    await db.menuItems.delete(item.id!);
-    showToast('Item deleted');
+    try {
+      await deleteMenuItem(item.id!);
+      showToast('Item deleted');
+      fetchMenuItems();
+    } catch { showToast('Failed to delete', 'error'); }
   };
 
   const saveCat = async () => {
     if (!editingCat?.name) { showToast('Category name required', 'error'); return; }
-    if (editingCat.id) {
-      await db.categories.update(editingCat.id, editingCat);
-    } else {
-      await db.categories.add({ name: editingCat.name!, sortOrder: categories.length + 1, isActive: true });
-    }
-    showToast(editingCat.id ? 'Category updated' : 'Category added');
-    setCatModal(false);
+    try {
+      if (editingCat.id) {
+        await updateCategory(editingCat.id, editingCat);
+      } else {
+        await addCategory({ name: editingCat.name!, sortOrder: categories.length + 1, isActive: true });
+      }
+      showToast(editingCat.id ? 'Category updated' : 'Category added');
+      setCatModal(false);
+      fetchCategories();
+    } catch { showToast('Failed to save category', 'error'); }
   };
 
   const deleteCat = async (cat: Category) => {
-    const count = await db.menuItems.where('categoryId').equals(cat.id!).count();
-    if (count > 0) { showToast(`Cannot delete: ${count} items use this category`, 'error'); return; }
-    if (!confirm(`Delete category "${cat.name}"?`)) return;
-    await db.categories.delete(cat.id!);
-    showToast('Category deleted');
+    try {
+      const count = await getMenuItemCount(cat.id!);
+      if (count > 0) { showToast(`Cannot delete: ${count} items use this category`, 'error'); return; }
+      if (!confirm(`Delete category "${cat.name}"?`)) return;
+      await deleteCategory(cat.id!);
+      showToast('Category deleted');
+      fetchCategories();
+    } catch { showToast('Failed to delete', 'error'); }
   };
 
   return (
@@ -205,7 +229,7 @@ export function MenuPage() {
             </label>
             <label className="flex items-center gap-2 text-sm cursor-pointer">
               <input type="checkbox" className="accent-brand-red" checked={editingItem?.gstInclusive ?? false} onChange={e => setEditingItem(f => ({ ...f, gstInclusive: e.target.checked }))} />
-              GST Inclusive (price includes tax)
+              GST Inclusive
             </label>
             <label className="flex items-center gap-2 text-sm cursor-pointer">
               <input type="checkbox" className="accent-brand-red" checked={editingItem?.isActive ?? true} onChange={e => setEditingItem(f => ({ ...f, isActive: e.target.checked }))} />
